@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: WCR Quiz
-Description: Simple quiz plugin with registration and scheduled start.
+Description: Prosty quiz z rejestracją i panelem zarządzania.
 Version: 0.1.0
 Author: OpenAI Assistant
 */
@@ -31,6 +31,8 @@ function wcrq_activate() {
         email varchar(100) NOT NULL,
         login varchar(60) NOT NULL,
         password varchar(255) NOT NULL,
+        approved tinyint(1) NOT NULL DEFAULT 0,
+        code varchar(20) DEFAULT NULL,
         created datetime DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         UNIQUE KEY login (login)
@@ -56,19 +58,22 @@ register_activation_hook(__FILE__, 'wcrq_activate');
 function wcrq_register_settings() {
     register_setting('wcrq_settings', 'wcrq_settings');
 
-    add_settings_section('wcrq_main', __('Quiz settings', 'wcrq'), '__return_false', 'wcrq');
+    add_settings_section('wcrq_main', __('Ustawienia quizu', 'wcrq'), '__return_false', 'wcrq');
 
-    add_settings_field('start_time', __('Start time', 'wcrq'), 'wcrq_field_start_time', 'wcrq', 'wcrq_main');
-    add_settings_field('duration', __('Duration (minutes)', 'wcrq'), 'wcrq_field_duration', 'wcrq', 'wcrq_main');
-    add_settings_field('questions', __('Questions JSON', 'wcrq'), 'wcrq_field_questions', 'wcrq', 'wcrq_main');
-    add_settings_field('show_results', __('Show result to user', 'wcrq'), 'wcrq_field_show_results', 'wcrq', 'wcrq_main');
+    add_settings_field('start_time', __('Czas rozpoczęcia', 'wcrq'), 'wcrq_field_start_time', 'wcrq', 'wcrq_main');
+    add_settings_field('duration', __('Czas trwania (minuty)', 'wcrq'), 'wcrq_field_duration', 'wcrq', 'wcrq_main');
+    add_settings_field('questions', __('Pytania', 'wcrq'), 'wcrq_field_questions', 'wcrq', 'wcrq_main');
+    add_settings_field('show_results', __('Pokaż wynik użytkownikowi', 'wcrq'), 'wcrq_field_show_results', 'wcrq', 'wcrq_main');
 }
 add_action('admin_init', 'wcrq_register_settings');
 
-function wcrq_settings_page() {
+function wcrq_admin_menu() {
     add_menu_page('WCR Quiz', 'WCR Quiz', 'manage_options', 'wcrq', 'wcrq_settings_page_html', 'dashicons-welcome-learn-more', 20);
+    add_submenu_page('wcrq', __('Ustawienia quizu', 'wcrq'), __('Ustawienia quizu', 'wcrq'), 'manage_options', 'wcrq', 'wcrq_settings_page_html');
+    add_submenu_page('wcrq', __('Rejestracje', 'wcrq'), __('Rejestracje', 'wcrq'), 'manage_options', 'wcrq_registrations', 'wcrq_registrations_page_html');
+    add_submenu_page('wcrq', __('Wyniki', 'wcrq'), __('Wyniki', 'wcrq'), 'manage_options', 'wcrq_results', 'wcrq_results_page_html');
 }
-add_action('admin_menu', 'wcrq_settings_page');
+add_action('admin_menu', 'wcrq_admin_menu');
 
 function wcrq_settings_page_html() {
     if (!current_user_can('manage_options')) {
@@ -88,6 +93,62 @@ function wcrq_settings_page_html() {
     <?php
 }
 
+function wcrq_registrations_page_html() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+    global $wpdb;
+    $table = $wpdb->prefix . 'wcrq_participants';
+    if (!empty($_GET['approve']) && check_admin_referer('wcrq_approve_participant')) {
+        $id = intval($_GET['approve']);
+        $code = wp_generate_password(6, false);
+        $wpdb->update($table, ['approved' => 1, 'code' => $code], ['id' => $id]);
+        $participant = $wpdb->get_row($wpdb->prepare("SELECT email FROM $table WHERE id = %d", $id));
+        if ($participant) {
+            wp_mail($participant->email, __('Kod dostępu do quizu', 'wcrq'), sprintf(__('Twój kod: %s', 'wcrq'), $code));
+        }
+        echo '<div class="updated"><p>' . __('Użytkownik zaakceptowany.', 'wcrq') . '</p></div>';
+    }
+    $rows = $wpdb->get_results("SELECT * FROM $table ORDER BY created DESC");
+    echo '<div class="wrap"><h1>' . esc_html(__('Rejestracje', 'wcrq')) . '</h1>';
+    if ($rows) {
+        echo '<table class="widefat"><thead><tr><th>' . __('Imię', 'wcrq') . '</th><th>Email</th><th>Login</th><th>' . __('Status', 'wcrq') . '</th><th>' . __('Kod', 'wcrq') . '</th><th>' . __('Akcja', 'wcrq') . '</th></tr></thead><tbody>';
+        foreach ($rows as $r) {
+            echo '<tr><td>' . esc_html($r->name) . '</td><td>' . esc_html($r->email) . '</td><td>' . esc_html($r->login) . '</td><td>' . ($r->approved ? __('Zaakceptowany', 'wcrq') : __('Oczekuje', 'wcrq')) . '</td><td>' . esc_html($r->code) . '</td><td>';
+            if (!$r->approved) {
+                $url = wp_nonce_url(admin_url('admin.php?page=wcrq_registrations&approve=' . $r->id), 'wcrq_approve_participant');
+                echo '<a class="button" href="' . esc_url($url) . '">' . __('Akceptuj', 'wcrq') . '</a>';
+            }
+            echo '</td></tr>';
+        }
+        echo '</tbody></table>';
+    } else {
+        echo '<p>' . __('Brak zgłoszeń.', 'wcrq') . '</p>';
+    }
+    echo '</div>';
+}
+
+function wcrq_results_page_html() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+    global $wpdb;
+    $pt = $wpdb->prefix . 'wcrq_participants';
+    $rt = $wpdb->prefix . 'wcrq_results';
+    $rows = $wpdb->get_results("SELECT p.name, p.email, r.score, r.start_time, r.end_time FROM $rt r JOIN $pt p ON r.participant_id = p.id ORDER BY r.end_time DESC");
+    echo '<div class="wrap"><h1>' . esc_html(__('Wyniki', 'wcrq')) . '</h1>';
+    if ($rows) {
+        echo '<table class="widefat"><thead><tr><th>' . __('Imię', 'wcrq') . '</th><th>Email</th><th>' . __('Wynik', 'wcrq') . '</th><th>' . __('Start', 'wcrq') . '</th><th>' . __('Koniec', 'wcrq') . '</th></tr></thead><tbody>';
+        foreach ($rows as $r) {
+            echo '<tr><td>' . esc_html($r->name) . '</td><td>' . esc_html($r->email) . '</td><td>' . esc_html($r->score) . '%</td><td>' . esc_html($r->start_time) . '</td><td>' . esc_html($r->end_time) . '</td></tr>';
+        }
+        echo '</tbody></table>';
+    } else {
+        echo '<p>' . __('Brak wyników.', 'wcrq') . '</p>';
+    }
+    echo '</div>';
+}
+
 function wcrq_field_start_time() {
     $options = get_option('wcrq_settings');
     $value = isset($options['start_time']) ? esc_attr($options['start_time']) : '';
@@ -102,9 +163,9 @@ function wcrq_field_duration() {
 
 function wcrq_field_questions() {
     $options = get_option('wcrq_settings');
-    $value = isset($options['questions']) ? esc_textarea($options['questions']) : '';
-    echo '<textarea name="wcrq_settings[questions]" rows="10" cols="50" class="large-text code">' . $value . '</textarea>';
-    echo '<p class="description">' . __('Enter questions as JSON array. Each question: {"question":"text","answers":["A","B","C","D"],"correct":1}', 'wcrq') . '</p>';
+    $value = isset($options['questions']) ? esc_attr($options['questions']) : '[]';
+    echo '<div id="wcrq-questions-builder"></div>';
+    echo '<input type="hidden" id="wcrq_questions_input" name="wcrq_settings[questions]" value="' . $value . '" />';
 }
 
 function wcrq_field_show_results() {
@@ -112,6 +173,13 @@ function wcrq_field_show_results() {
     $checked = isset($options['show_results']) ? (bool)$options['show_results'] : false;
     echo '<input type="checkbox" name="wcrq_settings[show_results]" value="1"' . checked(1, $checked, false) . ' />';
 }
+
+function wcrq_admin_scripts($hook) {
+    if (isset($_GET['page']) && $_GET['page'] === 'wcrq') {
+        wp_enqueue_script('wcrq-questions-builder', plugins_url('assets/js/questions-builder.js', __FILE__), ['jquery'], '0.1', true);
+    }
+}
+add_action('admin_enqueue_scripts', 'wcrq_admin_scripts');
 
 // Registration shortcode
 function wcrq_registration_shortcode() {
@@ -128,20 +196,22 @@ function wcrq_registration_shortcode() {
                 'name' => $name,
                 'email' => $email,
                 'login' => $login,
-                'password' => wp_hash_password($password)
+                'password' => wp_hash_password($password),
+                'approved' => 0,
+                'code' => null
             ]);
-            $output .= '<p>' . __('Registration complete. Keep your login and password.', 'wcrq') . '</p>';
+            $output .= '<p>' . __('Rejestracja wysłana. Poczekaj na akceptację.', 'wcrq') . '</p>';
         } else {
-            $output .= '<p>' . __('All fields required.', 'wcrq') . '</p>';
+            $output .= '<p>' . __('Wszystkie pola są wymagane.', 'wcrq') . '</p>';
         }
     }
     $output .= '<form method="post" class="wcrq-registration">'
         . wp_nonce_field('wcrq_reg', 'wcrq_reg_nonce', true, false)
-        . '<p><label>' . __('Name', 'wcrq') . '<br /><input type="text" name="wcrq_name" required></label></p>'
-        . '<p><label>' . __('Email', 'wcrq') . '<br /><input type="email" name="wcrq_email" required></label></p>'
-        . '<p><label>' . __('Login', 'wcrq') . '<br /><input type="text" name="wcrq_login" required></label></p>'
-        . '<p><label>' . __('Password', 'wcrq') . '<br /><input type="password" name="wcrq_password" required></label></p>'
-        . '<p><button type="submit">' . __('Register', 'wcrq') . '</button></p>'
+        . '<p><label>' . __('Imię', 'wcrq') . '<br /><input type="text" name="wcrq_name" required></label></p>'
+        . '<p><label>Email<br /><input type="email" name="wcrq_email" required></label></p>'
+        . '<p><label>Login<br /><input type="text" name="wcrq_login" required></label></p>'
+        . '<p><label>' . __('Hasło', 'wcrq') . '<br /><input type="password" name="wcrq_password" required></label></p>'
+        . '<p><button type="submit">' . __('Zarejestruj się', 'wcrq') . '</button></p>'
         . '</form>';
     return $output;
 }
@@ -157,10 +227,10 @@ function wcrq_quiz_shortcode() {
 
     if ($now < $start_time) {
         $remaining = $start_time - $now;
-        return '<p>' . sprintf(__('Quiz will start in %s minutes.', 'wcrq'), ceil($remaining/60)) . '</p>';
+        return '<p>' . sprintf(__('Quiz rozpocznie się za %s minut.', 'wcrq'), ceil($remaining/60)) . '</p>';
     }
     if ($now > $end_time) {
-        return '<p>' . __('Quiz time has ended.', 'wcrq') . '</p>';
+        return '<p>' . __('Czas na quiz się skończył.', 'wcrq') . '</p>';
     }
     $remaining = $end_time - $now;
 
@@ -174,7 +244,7 @@ function wcrq_quiz_shortcode() {
         if (!empty($_POST['wcrq_start'])) {
             $_SESSION['wcrq_started'] = time();
         } else {
-            return '<form method="post"><p><button type="submit" name="wcrq_start" value="1">' . __('Start Quiz', 'wcrq') . '</button></p></form>';
+            return '<form method="post"><p><button type="submit" name="wcrq_start" value="1">' . __('Rozpocznij quiz', 'wcrq') . '</button></p></form>';
         }
     }
 
@@ -186,7 +256,7 @@ function wcrq_quiz_shortcode() {
     // Display quiz
     $questions = json_decode($options['questions'], true);
     if (!$questions) {
-        return '<p>' . __('No questions configured.', 'wcrq') . '</p>';
+        return '<p>' . __('Brak skonfigurowanych pytań.', 'wcrq') . '</p>';
     }
     shuffle($questions);
     foreach ($questions as &$q) {
@@ -213,7 +283,7 @@ function wcrq_quiz_shortcode() {
         }
         $out .= '</div>';
     }
-    $out .= '<p><button type="submit">' . __('Finish', 'wcrq') . '</button></p></form>';
+    $out .= '<p><button type="submit">' . __('Zakończ', 'wcrq') . '</button></p></form>';
     return $out;
 }
 add_shortcode('wcr_quiz', 'wcrq_quiz_shortcode');
@@ -224,9 +294,8 @@ function wcrq_login_form($message = '') {
         $out .= '<p>' . esc_html($message) . '</p>';
     }
     $out .= '<form method="post" class="wcrq-login">'
-        . '<p><label>' . __('Login', 'wcrq') . '<br /><input type="text" name="wcrq_login" required></label></p>'
-        . '<p><label>' . __('Password', 'wcrq') . '<br /><input type="password" name="wcrq_password" required></label></p>'
-        . '<p><button type="submit" name="wcrq_do_login" value="1">' . __('Log in', 'wcrq') . '</button></p>'
+        . '<p><label>' . __('Kod dostępu', 'wcrq') . '<br /><input type="text" name="wcrq_code" required></label></p>'
+        . '<p><button type="submit" name="wcrq_do_login" value="1">' . __('Wejdź', 'wcrq') . '</button></p>'
         . '</form>';
     return $out;
 }
@@ -235,14 +304,13 @@ function wcrq_quiz_shortcode_process_login() {
     if (!empty($_POST['wcrq_do_login'])) {
         global $wpdb;
         $table = $wpdb->prefix . 'wcrq_participants';
-        $login = sanitize_user($_POST['wcrq_login'] ?? '');
-        $password = sanitize_text_field($_POST['wcrq_password'] ?? '');
-        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE login = %s", $login));
-        if ($row && wp_check_password($password, $row->password)) {
+        $code = sanitize_text_field($_POST['wcrq_code'] ?? '');
+        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE code = %s AND approved = 1", $code));
+        if ($row) {
             $_SESSION['wcrq_participant'] = $row->id;
             return true;
         } else {
-            echo wcrq_login_form(__('Invalid credentials', 'wcrq'));
+            echo wcrq_login_form(__('Nieprawidłowy kod.', 'wcrq'));
             return false;
         }
     }
@@ -252,12 +320,12 @@ add_action('template_redirect', 'wcrq_quiz_shortcode_process_login');
 
 function wcrq_handle_quiz_submit() {
     if (empty($_SESSION['wcrq_questions']) || empty($_SESSION['wcrq_participant'])) {
-        return '<p>' . __('Session expired.', 'wcrq') . '</p>';
+        return '<p>' . __('Sesja wygasła.', 'wcrq') . '</p>';
     }
     $options = get_option('wcrq_settings');
     $end = isset($options['start_time']) ? strtotime($options['start_time']) + intval($options['duration']) * 60 : time();
     if (current_time('timestamp') > $end) {
-        return '<p>' . __('Quiz time has ended.', 'wcrq') . '</p>';
+        return '<p>' . __('Czas na quiz się skończył.', 'wcrq') . '</p>';
     }
 
     $questions = $_SESSION['wcrq_questions'];
@@ -287,8 +355,8 @@ function wcrq_handle_quiz_submit() {
 
     $options = get_option('wcrq_settings');
     if (!empty($options['show_results'])) {
-        return '<p>' . sprintf(__('Your score: %s%%', 'wcrq'), $score) . '</p>';
+        return '<p>' . sprintf(__('Twój wynik: %s%%', 'wcrq'), $score) . '</p>';
     }
-    return '<p>' . __('Your answers have been submitted.', 'wcrq') . '</p>';
+    return '<p>' . __('Twoje odpowiedzi zostały zapisane.', 'wcrq') . '</p>';
 }
 
