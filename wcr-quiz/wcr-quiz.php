@@ -107,7 +107,8 @@ function wcrq_registrations_page_html() {
         if ($participant) {
             wp_mail($participant->email, __('Kod dostępu do quizu', 'wcrq'), sprintf(__('Twój kod: %s', 'wcrq'), $code));
         }
-        echo '<div class="updated"><p>' . __('Użytkownik zaakceptowany.', 'wcrq') . '</p></div>';
+        // Show generated code in the admin notice so it's clear it was assigned.
+        echo '<div class="updated"><p>' . sprintf(__('Użytkownik zaakceptowany. Kod: %s', 'wcrq'), esc_html($code)) . '</p></div>';
     }
     $rows = $wpdb->get_results("SELECT * FROM $table ORDER BY created DESC");
     echo '<div class="wrap"><h1>' . esc_html(__('Rejestracje', 'wcrq')) . '</h1>';
