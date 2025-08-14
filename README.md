@@ -1,0 +1,1 @@
+QUIZ dla uczniów z pytaniami zamkniętymi. Najpierw formularz rejestracji. Następnie Quiz zaplanowany na dany dzień, przeprowadzany online z wynikami automatycznymi. Całość zbudowana na wordpress (dedykowana wtyczka).
