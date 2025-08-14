@@ -66,7 +66,7 @@ function wcrq_register_settings() {
 add_action('admin_init', 'wcrq_register_settings');
 
 function wcrq_settings_page() {
-    add_options_page('WCR Quiz', 'WCR Quiz', 'manage_options', 'wcrq', 'wcrq_settings_page_html');
+    add_menu_page('WCR Quiz', 'WCR Quiz', 'manage_options', 'wcrq', 'wcrq_settings_page_html', 'dashicons-welcome-learn-more', 20);
 }
 add_action('admin_menu', 'wcrq_settings_page');
 
