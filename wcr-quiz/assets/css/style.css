@@ -1,11 +1,13 @@
+
 .wcrq-registration, .wcrq-login, .wcrq-quiz {
     background: #f0fdf4;
     border: 2px solid #16a34a;
     border-radius: 8px;
-    padding: 1.5rem;
-    max-width: 500px;
-    margin: 1rem auto;
+    padding: 2.5rem;
+    max-width: 600px;
+    margin: 2rem auto;
     font-family: Arial, sans-serif;
+    font-size: 1.1rem;
 }
 
 .wcrq-registration label, .wcrq-login label {
@@ -13,16 +15,18 @@
     margin-bottom: 0.5rem;
     color: #166534;
     font-weight: 600;
+    font-size: 1.1rem;
 }
 
 .wcrq-registration input,
 .wcrq-login input {
     width: 100%;
-    padding: 0.5rem;
+    padding: 0.75rem;
     margin-top: 0.25rem;
     border: 1px solid #a3d9a5;
     border-radius: 4px;
     box-sizing: border-box;
+    font-size: 1rem;
 }
 
 .wcrq-registration button,
@@ -30,14 +34,33 @@
 .wcrq-quiz button {
     background: #16a34a;
     color: #fff;
-    padding: 0.5rem 1rem;
+    padding: 0.75rem 1.5rem;
     border: none;
     border-radius: 4px;
     cursor: pointer;
+    font-size: 1rem;
 }
 
 .wcrq-registration button:hover,
 .wcrq-login button:hover,
 .wcrq-quiz button:hover {
     background: #15803d;
+}
+
+.wcrq-registration p {
+    margin-bottom: 1.5rem;
+}
+
+.wcrq-eco {
+    text-align: center;
+    margin-bottom: 1.5rem;
+}
+
+.wcrq-eco img {
+    max-width: 80px;
+    height: auto;
+}
+
+.wcrq-info {
+    color: #166534;
 }
