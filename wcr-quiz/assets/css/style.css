@@ -55,3 +55,10 @@
     color: #555;
     font-size: 0.9rem;
 }
+
+/* Images inside questions */
+.wcrq-question-image {
+    max-width: 100%;
+    height: auto;
+    margin-bottom: 1rem;
+}
