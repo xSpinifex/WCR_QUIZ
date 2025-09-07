@@ -349,7 +349,7 @@ function wcrq_registration_shortcode() {
     }
     $output .= '<form method="post" class="wcrq-registration">'
         . wp_nonce_field('wcrq_reg', 'wcrq_reg_nonce', true, false)
-        . '<div class="wcrq-eco-icon" aria-hidden="true">&#x1F331;</div>'
+        . '<div class="wcrq-eco" aria-hidden="true">&#x1F331;</div>'
         . '<p><label>' . __('Nazwa szkoły', 'wcrq') . '<br /><input type="text" name="wcrq_school" required maxlength="150"></label></p>'
         . '<p><label>' . __('Imię i nazwisko', 'wcrq') . '<br /><input type="text" name="wcrq_name" required maxlength="100"></label></p>'
         . '<p><label>' . __('Klasa', 'wcrq') . '<br /><input type="text" name="wcrq_class" required maxlength="50"></label></p>'
