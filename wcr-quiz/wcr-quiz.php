@@ -18,6 +18,12 @@ function wcrq_maybe_start_session() {
 }
 add_action('init', 'wcrq_maybe_start_session');
 
+// Enqueue frontend styles
+function wcrq_enqueue_assets() {
+    wp_enqueue_style('wcrq-style', plugins_url('assets/css/style.css', __FILE__), [], '0.1');
+}
+add_action('wp_enqueue_scripts', 'wcrq_enqueue_assets');
+
 // Activation: create DB tables
 function wcrq_activate() {
     global $wpdb;
@@ -27,12 +33,13 @@ function wcrq_activate() {
 
     $sql1 = "CREATE TABLE $participants_table (
         id mediumint(9) NOT NULL AUTO_INCREMENT,
+        school varchar(150) NOT NULL,
         name varchar(100) NOT NULL,
+        class varchar(50) NOT NULL,
         email varchar(100) NOT NULL,
         login varchar(60) NOT NULL,
         password varchar(255) NOT NULL,
-        approved tinyint(1) NOT NULL DEFAULT 0,
-        code varchar(20) DEFAULT NULL,
+        pass_plain varchar(255) NOT NULL,
         created datetime DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         UNIQUE KEY login (login)
@@ -99,28 +106,28 @@ function wcrq_registrations_page_html() {
     }
     global $wpdb;
     $table = $wpdb->prefix . 'wcrq_participants';
-    if (!empty($_GET['approve']) && check_admin_referer('wcrq_approve_participant')) {
-        $id = intval($_GET['approve']);
-        $code = wp_generate_password(6, false);
-        $wpdb->update($table, ['approved' => 1, 'code' => $code], ['id' => $id]);
-        $participant = $wpdb->get_row($wpdb->prepare("SELECT email FROM $table WHERE id = %d", $id));
-        if ($participant) {
-            wp_mail($participant->email, __('Kod dostępu do quizu', 'wcrq'), sprintf(__('Twój kod: %s', 'wcrq'), $code));
-        }
-        // Show generated code in the admin notice so it's clear it was assigned.
-        echo '<div class="updated"><p>' . sprintf(__('Użytkownik zaakceptowany. Kod: %s', 'wcrq'), esc_html($code)) . '</p></div>';
-    }
     $rows = $wpdb->get_results("SELECT * FROM $table ORDER BY created DESC");
     echo '<div class="wrap"><h1>' . esc_html(__('Rejestracje', 'wcrq')) . '</h1>';
     if ($rows) {
-        echo '<table class="widefat"><thead><tr><th>' . __('Imię', 'wcrq') . '</th><th>Email</th><th>Login</th><th>' . __('Status', 'wcrq') . '</th><th>' . __('Kod', 'wcrq') . '</th><th>' . __('Akcja', 'wcrq') . '</th></tr></thead><tbody>';
+        echo '<table class="widefat"><thead><tr>'
+            . '<th>' . __('Szkoła', 'wcrq') . '</th>'
+            . '<th>' . __('Uczeń', 'wcrq') . '</th>'
+            . '<th>' . __('Klasa', 'wcrq') . '</th>'
+            . '<th>Email</th>'
+            . '<th>' . __('Login', 'wcrq') . '</th>'
+            . '<th>' . __('Hasło', 'wcrq') . '</th>'
+            . '<th>' . __('Zarejestrowano', 'wcrq') . '</th>'
+            . '</tr></thead><tbody>';
         foreach ($rows as $r) {
-            echo '<tr><td>' . esc_html($r->name) . '</td><td>' . esc_html($r->email) . '</td><td>' . esc_html($r->login) . '</td><td>' . ($r->approved ? __('Zaakceptowany', 'wcrq') : __('Oczekuje', 'wcrq')) . '</td><td>' . esc_html($r->code) . '</td><td>';
-            if (!$r->approved) {
-                $url = wp_nonce_url(admin_url('admin.php?page=wcrq_registrations&approve=' . $r->id), 'wcrq_approve_participant');
-                echo '<a class="button" href="' . esc_url($url) . '">' . __('Akceptuj', 'wcrq') . '</a>';
-            }
-            echo '</td></tr>';
+            echo '<tr>'
+                . '<td>' . esc_html($r->school) . '</td>'
+                . '<td>' . esc_html($r->name) . '</td>'
+                . '<td>' . esc_html($r->class) . '</td>'
+                . '<td>' . esc_html($r->email) . '</td>'
+                . '<td>' . esc_html($r->login) . '</td>'
+                . '<td>' . esc_html($r->pass_plain) . '</td>'
+                . '<td>' . esc_html($r->created) . '</td>'
+                . '</tr>';
         }
         echo '</tbody></table>';
     } else {
@@ -188,30 +195,38 @@ function wcrq_registration_shortcode() {
     if (!empty($_POST['wcrq_reg_nonce']) && wp_verify_nonce($_POST['wcrq_reg_nonce'], 'wcrq_reg')) {
         global $wpdb;
         $table = $wpdb->prefix . 'wcrq_participants';
+        $school = sanitize_text_field($_POST['wcrq_school'] ?? '');
         $name = sanitize_text_field($_POST['wcrq_name'] ?? '');
+        $class = sanitize_text_field($_POST['wcrq_class'] ?? '');
         $email = sanitize_email($_POST['wcrq_email'] ?? '');
-        $login = sanitize_user($_POST['wcrq_login'] ?? '');
-        $password = sanitize_text_field($_POST['wcrq_password'] ?? '');
-        if ($name && $email && $login && $password) {
+        if ($school && $name && $class && $email) {
+            // Generate unique login and password
+            do {
+                $login = strtolower(wp_generate_password(8, false));
+                $exists = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table WHERE login = %s", $login));
+            } while ($exists);
+            $password = wp_generate_password(8, false);
             $wpdb->insert($table, [
+                'school' => $school,
                 'name' => $name,
+                'class' => $class,
                 'email' => $email,
                 'login' => $login,
                 'password' => wp_hash_password($password),
-                'approved' => 0,
-                'code' => null
+                'pass_plain' => $password
             ]);
-            $output .= '<p>' . __('Rejestracja wysłana. Poczekaj na akceptację.', 'wcrq') . '</p>';
+            wp_mail($email, __('Dane logowania do quizu', 'wcrq'), sprintf(__('Twój login: %s\nHasło: %s', 'wcrq'), $login, $password));
+            $output .= '<p>' . __('Rejestracja zakończona sukcesem. Sprawdź e-mail.', 'wcrq') . '</p>';
         } else {
             $output .= '<p>' . __('Wszystkie pola są wymagane.', 'wcrq') . '</p>';
         }
     }
     $output .= '<form method="post" class="wcrq-registration">'
         . wp_nonce_field('wcrq_reg', 'wcrq_reg_nonce', true, false)
-        . '<p><label>' . __('Imię', 'wcrq') . '<br /><input type="text" name="wcrq_name" required></label></p>'
+        . '<p><label>' . __('Nazwa szkoły', 'wcrq') . '<br /><input type="text" name="wcrq_school" required></label></p>'
+        . '<p><label>' . __('Imię i nazwisko', 'wcrq') . '<br /><input type="text" name="wcrq_name" required></label></p>'
+        . '<p><label>' . __('Klasa', 'wcrq') . '<br /><input type="text" name="wcrq_class" required></label></p>'
         . '<p><label>Email<br /><input type="email" name="wcrq_email" required></label></p>'
-        . '<p><label>Login<br /><input type="text" name="wcrq_login" required></label></p>'
-        . '<p><label>' . __('Hasło', 'wcrq') . '<br /><input type="password" name="wcrq_password" required></label></p>'
         . '<p><button type="submit">' . __('Zarejestruj się', 'wcrq') . '</button></p>'
         . '</form>';
     return $output;
@@ -295,7 +310,8 @@ function wcrq_login_form($message = '') {
         $out .= '<p>' . esc_html($message) . '</p>';
     }
     $out .= '<form method="post" class="wcrq-login">'
-        . '<p><label>' . __('Kod dostępu', 'wcrq') . '<br /><input type="text" name="wcrq_code" required></label></p>'
+        . '<p><label>Login<br /><input type="text" name="wcrq_login" required></label></p>'
+        . '<p><label>' . __('Hasło', 'wcrq') . '<br /><input type="password" name="wcrq_pass" required></label></p>'
         . '<p><button type="submit" name="wcrq_do_login" value="1">' . __('Wejdź', 'wcrq') . '</button></p>'
         . '</form>';
     return $out;
@@ -305,13 +321,14 @@ function wcrq_quiz_shortcode_process_login() {
     if (!empty($_POST['wcrq_do_login'])) {
         global $wpdb;
         $table = $wpdb->prefix . 'wcrq_participants';
-        $code = sanitize_text_field($_POST['wcrq_code'] ?? '');
-        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE code = %s AND approved = 1", $code));
-        if ($row) {
+        $login = sanitize_user($_POST['wcrq_login'] ?? '');
+        $pass = $_POST['wcrq_pass'] ?? '';
+        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE login = %s", $login));
+        if ($row && wp_check_password($pass, $row->password)) {
             $_SESSION['wcrq_participant'] = $row->id;
             return true;
         } else {
-            echo wcrq_login_form(__('Nieprawidłowy kod.', 'wcrq'));
+            echo wcrq_login_form(__('Nieprawidłowy login lub hasło.', 'wcrq'));
             return false;
         }
     }
