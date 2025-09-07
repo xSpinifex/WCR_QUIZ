@@ -267,58 +267,92 @@ add_action('admin_enqueue_scripts', 'wcrq_admin_scripts');
 // Registration shortcode
 function wcrq_registration_shortcode() {
     $output = '';
+    wp_enqueue_script('wcrq-registration', plugins_url('assets/js/registration.js', __FILE__), [], '0.1', true);
     if (!empty($_POST['wcrq_reg_nonce']) && wp_verify_nonce($_POST['wcrq_reg_nonce'], 'wcrq_reg')) {
-        global $wpdb;
-        $table = $wpdb->prefix . 'wcrq_participants';
-        $school = sanitize_text_field($_POST['wcrq_school'] ?? '');
-        $name = sanitize_text_field($_POST['wcrq_name'] ?? '');
-        $class = sanitize_text_field($_POST['wcrq_class'] ?? '');
-        $email = sanitize_email($_POST['wcrq_email'] ?? '');
-        if ($school && $name && $class && $email) {
-            // Generate unique login and password
-            do {
-                $login = strtolower(wp_generate_password(8, false));
-                $exists = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table WHERE login = %s", $login));
-            } while ($exists);
-            $password = wp_generate_password(8, false);
-            $inserted = $wpdb->insert($table, [
-                'school' => $school,
-                'name' => $name,
-                'class' => $class,
-                'email' => $email,
-                'login' => $login,
-                'password' => wp_hash_password($password),
-                'pass_plain' => $password,
-                'blocked' => 0
-            ]);
+        $raw_school = $_POST['wcrq_school'] ?? '';
+        $raw_name = $_POST['wcrq_name'] ?? '';
+        $raw_class = $_POST['wcrq_class'] ?? '';
+        $raw_email = $_POST['wcrq_email'] ?? '';
+        $pattern = '/<[^>]*>|(SELECT|INSERT|DELETE|UPDATE|DROP|UNION|--)/i';
+        if (preg_match($pattern, $raw_school . $raw_name . $raw_class . $raw_email)) {
+            $output .= '<p>nie mozna psuć</p>';
+        } else {
+            global $wpdb;
+            $table = $wpdb->prefix . 'wcrq_participants';
+            $school = sanitize_text_field($raw_school);
+            $name = sanitize_text_field($raw_name);
+            $class = sanitize_text_field($raw_class);
+            $email = sanitize_email($raw_email);
+            $errors = [];
+            if (mb_strlen($school) > 150) {
+                $errors[] = __('Nazwa szkoły jest zbyt długa.', 'wcrq');
+            }
+            if (mb_strlen($name) > 100) {
+                $errors[] = __('Imię i nazwisko jest zbyt długie.', 'wcrq');
+            }
+            if (mb_strlen($class) > 50) {
+                $errors[] = __('Klasa jest zbyt długa.', 'wcrq');
+            }
+            if (mb_strlen($email) > 100) {
+                $errors[] = __('Email jest zbyt długi.', 'wcrq');
+            }
+            if ($school && $name && $class && $email && empty($errors)) {
+                $email_exists = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table WHERE email = %s", $email));
+                if ($email_exists) {
+                    $output .= '<p>' . __('Ten e-mail został już wykorzystany do rejestracji.', 'wcrq') . '</p>';
+                } else {
+                    // Generate unique login and password
+                    do {
+                        $login = strtolower(wp_generate_password(8, false));
+                        $exists = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table WHERE login = %s", $login));
+                    } while ($exists);
+                    $password = wp_generate_password(8, false);
+                    $inserted = $wpdb->insert($table, [
+                        'school' => $school,
+                        'name' => $name,
+                        'class' => $class,
+                        'email' => $email,
+                        'login' => $login,
+                        'password' => wp_hash_password($password),
+                        'pass_plain' => $password,
+                        'blocked' => 0
+                    ]);
 
-            if ($inserted === false) {
-                $output .= '<p>' . __('Wystąpił błąd podczas rejestracji. Spróbuj ponownie później.', 'wcrq') . '</p>';
-                if (!empty($wpdb->last_error)) {
-                    $output .= '<p><small>' . esc_html($wpdb->last_error) . '</small></p>';
+                    if ($inserted === false) {
+                        $output .= '<p>' . __('Wystąpił błąd podczas rejestracji. Spróbuj ponownie później.', 'wcrq') . '</p>';
+                        if (!empty($wpdb->last_error)) {
+                            $output .= '<p><small>' . esc_html($wpdb->last_error) . '</small></p>';
+                        }
+                    } else {
+                        $subject = __('Dane logowania do quizu', 'wcrq');
+                        $body = sprintf(
+                            __('Szanowny Użytkowniku,<br><br>z radością informujemy, że Twoje konto w WCR Quiz zostało pomyślnie utworzone.<br><br><strong>Dane logowania:</strong><br>• Login: %1$s<br>• Hasło: %2$s <br><br>W razie pytań lub problemów nasi konsultanci chętnie pomogą.<br><br>Z wyrazami szacunku,<br>Zespół WCR Quiz', 'wcrq'),
+                            esc_html($login),
+                            esc_html($password)
+                        );
+                        $headers = ['Content-Type: text/html; charset=UTF-8'];
+                        wp_mail($email, $subject, $body, $headers);
+
+                        $output .= '<p>' . __('Rejestracja zakończona sukcesem. Sprawdź e-mail.', 'wcrq') . '</p>';
+                    }
                 }
             } else {
-                $subject = __('Dane logowania do quizu', 'wcrq');
-                $body = sprintf(
-                    __('Szanowny Użytkowniku,<br><br>z radością informujemy, że Twoje konto w WCR Quiz zostało pomyślnie utworzone.<br><br><strong>Dane logowania:</strong><br>• Login: %1$s<br>• Hasło: %2$s <br><br>W razie pytań lub problemów nasi konsultanci chętnie pomogą.<br><br>Z wyrazami szacunku,<br>Zespół WCR Quiz', 'wcrq'),
-                    esc_html($login),
-                    esc_html($password)
-                );
-                $headers = ['Content-Type: text/html; charset=UTF-8'];
-                wp_mail($email, $subject, $body, $headers);
-
-                $output .= '<p>' . __('Rejestracja zakończona sukcesem. Sprawdź e-mail.', 'wcrq') . '</p>';
+                if ($errors) {
+                    foreach ($errors as $err) {
+                        $output .= '<p>' . esc_html($err) . '</p>';
+                    }
+                } else {
+                    $output .= '<p>' . __('Wszystkie pola są wymagane.', 'wcrq') . '</p>';
+                }
             }
-        } else {
-            $output .= '<p>' . __('Wszystkie pola są wymagane.', 'wcrq') . '</p>';
         }
     }
     $output .= '<form method="post" class="wcrq-registration">'
         . wp_nonce_field('wcrq_reg', 'wcrq_reg_nonce', true, false)
-        . '<p><label>' . __('Nazwa szkoły', 'wcrq') . '<br /><input type="text" name="wcrq_school" required></label></p>'
-        . '<p><label>' . __('Imię i nazwisko', 'wcrq') . '<br /><input type="text" name="wcrq_name" required></label></p>'
-        . '<p><label>' . __('Klasa', 'wcrq') . '<br /><input type="text" name="wcrq_class" required></label></p>'
-        . '<p><label>Email<br /><input type="email" name="wcrq_email" required></label></p>'
+        . '<p><label>' . __('Nazwa szkoły', 'wcrq') . '<br /><input type="text" name="wcrq_school" required maxlength="150"></label></p>'
+        . '<p><label>' . __('Imię i nazwisko', 'wcrq') . '<br /><input type="text" name="wcrq_name" required maxlength="100"></label></p>'
+        . '<p><label>' . __('Klasa', 'wcrq') . '<br /><input type="text" name="wcrq_class" required maxlength="50"></label></p>'
+        . '<p><label>Email<br /><input type="email" name="wcrq_email" required maxlength="100"></label></p>'
         . '<p><button type="submit">' . __('Zarejestruj się', 'wcrq') . '</button></p>'
         . '</form>';
     return $output;
