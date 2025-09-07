@@ -347,9 +347,7 @@ function wcrq_registration_shortcode() {
             }
         }
     }
-    $icon = plugins_url('assets/images/leaf.svg', __FILE__);
     $output .= '<form method="post" class="wcrq-registration">'
-        . '<div class="wcrq-eco"><img src="' . esc_url($icon) . '" alt="Eko" /></div>'
         . wp_nonce_field('wcrq_reg', 'wcrq_reg_nonce', true, false)
         . '<p><label>' . __('Nazwa szkoły', 'wcrq') . '<br /><input type="text" name="wcrq_school" required maxlength="150"></label></p>'
         . '<p><label>' . __('Imię i nazwisko', 'wcrq') . '<br /><input type="text" name="wcrq_name" required maxlength="100"></label></p>'
