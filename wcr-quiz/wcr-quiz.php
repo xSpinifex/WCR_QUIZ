@@ -77,21 +77,33 @@ function wcrq_maybe_update_participants_table() {
     if (!$pass_plain_exists) {
         $wpdb->query("ALTER TABLE $table ADD pass_plain varchar(255) NOT NULL DEFAULT ''");
     }
+
 }
 add_action('plugins_loaded', 'wcrq_maybe_update_participants_table');
 
-if (!function_exists('wcrq_maybe_create_tables')) {
-    function wcrq_maybe_create_tables() {
-        global $wpdb;
-        $participants_table = $wpdb->prefix . 'wcrq_participants';
-        $results_table = $wpdb->prefix . 'wcrq_results';
-        $p_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $participants_table));
-        $r_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $results_table));
-        if ($p_exists !== $participants_table || $r_exists !== $results_table) {
-            wcrq_activate();
-        }
+function wcrq_maybe_create_tables() {
+    global $wpdb;
+    $participants_table = $wpdb->prefix . 'wcrq_participants';
+    $results_table = $wpdb->prefix . 'wcrq_results';
+    $p_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $participants_table));
+    $r_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $results_table));
+    if ($p_exists !== $participants_table || $r_exists !== $results_table) {
+        wcrq_activate();
     }
 }
+add_action('plugins_loaded', 'wcrq_maybe_create_tables');
+
+function wcrq_maybe_create_tables() {
+    global $wpdb;
+    $participants_table = $wpdb->prefix . 'wcrq_participants';
+    $results_table = $wpdb->prefix . 'wcrq_results';
+    $p_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $participants_table));
+    $r_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $results_table));
+    if ($p_exists !== $participants_table || $r_exists !== $results_table) {
+        wcrq_activate();
+    }
+}
+
 add_action('plugins_loaded', 'wcrq_maybe_create_tables');
 
 // Settings page
