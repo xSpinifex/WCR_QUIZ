@@ -92,18 +92,6 @@ function wcrq_maybe_create_tables() {
 }
 add_action('plugins_loaded', 'wcrq_maybe_create_tables');
 
-function wcrq_maybe_create_tables() {
-    global $wpdb;
-    $participants_table = $wpdb->prefix . 'wcrq_participants';
-    $results_table = $wpdb->prefix . 'wcrq_results';
-    $p_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $participants_table));
-    $r_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $results_table));
-    if ($p_exists !== $participants_table || $r_exists !== $results_table) {
-        wcrq_activate();
-    }
-}
-add_action('plugins_loaded', 'wcrq_maybe_create_tables');
-
 // Settings page
 function wcrq_register_settings() {
     register_setting('wcrq_settings', 'wcrq_settings');
