@@ -353,6 +353,7 @@ function wcrq_registration_shortcode() {
         . '<p><label>' . __('Imię i nazwisko', 'wcrq') . '<br /><input type="text" name="wcrq_name" required maxlength="100"></label></p>'
         . '<p><label>' . __('Klasa', 'wcrq') . '<br /><input type="text" name="wcrq_class" required maxlength="50"></label></p>'
         . '<p><label>Email<br /><input type="email" name="wcrq_email" required maxlength="100"></label></p>'
+        . '<p class="wcrq-info">' . __('Jeden adres mailowy może być wykorzystany tylko 1 raz. Po rejestracji otrzymasz dane identyfikacyjne do udziału w quizie.', 'wcrq') . '</p>'
         . '<p><button type="submit">' . __('Zarejestruj się', 'wcrq') . '</button></p>'
         . '</form>';
     return $output;
