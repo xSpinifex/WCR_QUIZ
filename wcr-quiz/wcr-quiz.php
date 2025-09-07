@@ -77,6 +77,7 @@ function wcrq_maybe_update_participants_table() {
     if (!$pass_plain_exists) {
         $wpdb->query("ALTER TABLE $table ADD pass_plain varchar(255) NOT NULL DEFAULT ''");
     }
+
 }
 add_action('plugins_loaded', 'wcrq_maybe_update_participants_table');
 
@@ -102,6 +103,7 @@ function wcrq_maybe_create_tables() {
         wcrq_activate();
     }
 }
+
 add_action('plugins_loaded', 'wcrq_maybe_create_tables');
 
 // Settings page
