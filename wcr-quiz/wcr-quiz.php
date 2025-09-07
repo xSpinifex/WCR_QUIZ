@@ -259,7 +259,15 @@ function wcrq_field_show_results() {
 
 function wcrq_admin_scripts($hook) {
     if (isset($_GET['page']) && $_GET['page'] === 'wcrq') {
-        wp_enqueue_script('wcrq-questions-builder', plugins_url('assets/js/questions-builder.js', __FILE__), ['jquery'], '0.1', true);
+        // Media is required for adding images to questions
+        wp_enqueue_media();
+        wp_enqueue_script(
+            'wcrq-questions-builder',
+            plugins_url('assets/js/questions-builder.js', __FILE__),
+            ['jquery'],
+            '0.2',
+            true
+        );
     }
 }
 add_action('admin_enqueue_scripts', 'wcrq_admin_scripts');
@@ -425,7 +433,11 @@ function wcrq_quiz_shortcode() {
     wp_enqueue_script('wcrq-quiz', plugins_url('assets/js/quiz.js', __FILE__), [], '0.1', true);
     $out = '<form method="post" class="wcrq-quiz" data-duration="' . intval($remaining) . '">' . wp_nonce_field('wcrq_quiz', 'wcrq_quiz_nonce', true, false);
     foreach ($questions as $idx => $q) {
-        $out .= '<div class="wcrq-question"><p>' . esc_html($q['question']) . '</p>';
+        $out .= '<div class="wcrq-question">';
+        $out .= '<p>' . esc_html($q['question']) . '</p>';
+        if (!empty($q['image'])) {
+            $out .= '<p><img src="' . esc_url($q['image']) . '" alt="" class="wcrq-question-image" /></p>';
+        }
         foreach ($q['answers'] as $a_idx => $answer) {
             $name = 'q' . $idx;
             $out .= '<label><input type="radio" name="' . esc_attr($name) . '" value="' . $a_idx . '"> ' . esc_html($answer) . '</label><br />';
