@@ -109,11 +109,11 @@ function wcrq_registrations_page_html() {
     $rows = $wpdb->get_results("SELECT * FROM $table ORDER BY created DESC");
     echo '<div class="wrap"><h1>' . esc_html(__('Rejestracje', 'wcrq')) . '</h1>';
     if ($rows) {
-        echo '<table class="widefat"><thead><tr>'
+        echo '<table class="wp-list-table widefat fixed striped"><thead><tr>'
             . '<th>' . __('Szkoła', 'wcrq') . '</th>'
             . '<th>' . __('Uczeń', 'wcrq') . '</th>'
             . '<th>' . __('Klasa', 'wcrq') . '</th>'
-            . '<th>Email</th>'
+            . '<th>' . __('Email', 'wcrq') . '</th>'
             . '<th>' . __('Login', 'wcrq') . '</th>'
             . '<th>' . __('Hasło', 'wcrq') . '</th>'
             . '<th>' . __('Zarejestrowano', 'wcrq') . '</th>'
@@ -215,7 +215,16 @@ function wcrq_registration_shortcode() {
                 'password' => wp_hash_password($password),
                 'pass_plain' => $password
             ]);
-            wp_mail($email, __('Dane logowania do quizu', 'wcrq'), sprintf(__('Twój login: %s\nHasło: %s', 'wcrq'), $login, $password));
+
+            $subject = __('Dane logowania do quizu', 'wcrq');
+            $body = sprintf(
+                __('Szanowny Użytkowniku,<br><br>z radością informujemy, że Twoje konto w WCR Quiz zostało pomyślnie utworzone.<br><br><strong>Dane logowania:</strong><br>• Login: %1$s<br>• Hasło: %2$s (po zalogowaniu zalecamy jego zmianę)<br><br>W razie pytań lub problemów nasi konsultanci chętnie pomogą.<br><br>Z wyrazami szacunku,<br>Zespół WCR Quiz', 'wcrq'),
+                esc_html($login),
+                esc_html($password)
+            );
+            $headers = ['Content-Type: text/html; charset=UTF-8'];
+            wp_mail($email, $subject, $body, $headers);
+
             $output .= '<p>' . __('Rejestracja zakończona sukcesem. Sprawdź e-mail.', 'wcrq') . '</p>';
         } else {
             $output .= '<p>' . __('Wszystkie pola są wymagane.', 'wcrq') . '</p>';
