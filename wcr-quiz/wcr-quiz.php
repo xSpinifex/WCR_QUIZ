@@ -40,6 +40,7 @@ function wcrq_activate() {
         login varchar(60) NOT NULL,
         password varchar(255) NOT NULL,
         pass_plain varchar(255) NOT NULL,
+        blocked tinyint(1) NOT NULL DEFAULT 0,
         created datetime DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         UNIQUE KEY login (login)
@@ -60,6 +61,20 @@ function wcrq_activate() {
     dbDelta($sql2);
 }
 register_activation_hook(__FILE__, 'wcrq_activate');
+
+function wcrq_maybe_add_blocked_column() {
+    global $wpdb;
+    $table = $wpdb->prefix . 'wcrq_participants';
+    $table_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $table));
+    if ($table_exists !== $table) {
+        return;
+    }
+    $exists = $wpdb->get_results($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'blocked'));
+    if (!$exists) {
+        $wpdb->query("ALTER TABLE $table ADD blocked tinyint(1) NOT NULL DEFAULT 0");
+    }
+}
+add_action('plugins_loaded', 'wcrq_maybe_add_blocked_column');
 
 // Settings page
 function wcrq_register_settings() {
@@ -106,8 +121,41 @@ function wcrq_registrations_page_html() {
     }
     global $wpdb;
     $table = $wpdb->prefix . 'wcrq_participants';
+    $results_table = $wpdb->prefix . 'wcrq_results';
+
+    // Delete all accounts
+    if (!empty($_POST['wcrq_delete_all_nonce']) && wp_verify_nonce($_POST['wcrq_delete_all_nonce'], 'wcrq_delete_all')) {
+        $pass = $_POST['wcrq_delete_all_pass'] ?? '';
+        $user = wp_get_current_user();
+        if (wp_check_password($pass, $user->user_pass, $user->ID)) {
+            $wpdb->query("TRUNCATE TABLE $results_table");
+            $wpdb->query("TRUNCATE TABLE $table");
+            echo '<div class="updated"><p>' . __('Wszystkie konta zostały usunięte.', 'wcrq') . '</p></div>';
+        } else {
+            echo '<div class="error"><p>' . __('Błędne hasło.', 'wcrq') . '</p></div>';
+        }
+    }
+
+    // Row actions
+    if (!empty($_GET['wcrq_action']) && !empty($_GET['id'])) {
+        $id = intval($_GET['id']);
+        if (wp_verify_nonce($_GET['_wpnonce'] ?? '', 'wcrq_reg_action_' . $id)) {
+            if ($_GET['wcrq_action'] === 'delete') {
+                $wpdb->delete($results_table, ['participant_id' => $id]);
+                $wpdb->delete($table, ['id' => $id]);
+            } elseif ($_GET['wcrq_action'] === 'block') {
+                $wpdb->update($table, ['blocked' => 1], ['id' => $id]);
+            } elseif ($_GET['wcrq_action'] === 'unblock') {
+                $wpdb->update($table, ['blocked' => 0], ['id' => $id]);
+            }
+        }
+    }
+
     $rows = $wpdb->get_results("SELECT * FROM $table ORDER BY created DESC");
     echo '<div class="wrap"><h1>' . esc_html(__('Rejestracje', 'wcrq')) . '</h1>';
+    echo '<form method="post" style="margin-bottom:20px;">' . wp_nonce_field('wcrq_delete_all', 'wcrq_delete_all_nonce', true, false)
+        . '<input type="password" name="wcrq_delete_all_pass" placeholder="' . esc_attr__('Hasło', 'wcrq') . '" required /> '
+        . '<button type="submit" class="button button-danger" onclick="return confirm(\'Usunąć wszystkie konta?\');">' . __('Usuń wszystkie konta', 'wcrq') . '</button></form>';
     if ($rows) {
         echo '<table class="wp-list-table widefat fixed striped"><thead><tr>'
             . '<th>' . __('Szkoła', 'wcrq') . '</th>'
@@ -117,8 +165,18 @@ function wcrq_registrations_page_html() {
             . '<th>' . __('Login', 'wcrq') . '</th>'
             . '<th>' . __('Hasło', 'wcrq') . '</th>'
             . '<th>' . __('Zarejestrowano', 'wcrq') . '</th>'
+            . '<th>' . __('Akcje', 'wcrq') . '</th>'
             . '</tr></thead><tbody>';
         foreach ($rows as $r) {
+            $time = mysql2date(get_option('date_format') . ' ' . get_option('time_format'), $r->created, true);
+            $nonce = wp_create_nonce('wcrq_reg_action_' . $r->id);
+            $actions = [];
+            if ($r->blocked) {
+                $actions[] = '<a href="' . esc_url(add_query_arg(['wcrq_action' => 'unblock', 'id' => $r->id, '_wpnonce' => $nonce])) . '">' . __('ODBLOKUJ', 'wcrq') . '</a>';
+            } else {
+                $actions[] = '<a href="' . esc_url(add_query_arg(['wcrq_action' => 'block', 'id' => $r->id, '_wpnonce' => $nonce])) . '">' . __('BLOKUJ', 'wcrq') . '</a>';
+            }
+            $actions[] = '<a href="' . esc_url(add_query_arg(['wcrq_action' => 'delete', 'id' => $r->id, '_wpnonce' => $nonce])) . '" onclick="return confirm(\'Usunąć?\');">' . __('USUŃ', 'wcrq') . '</a>';
             echo '<tr>'
                 . '<td>' . esc_html($r->school) . '</td>'
                 . '<td>' . esc_html($r->name) . '</td>'
@@ -126,7 +184,8 @@ function wcrq_registrations_page_html() {
                 . '<td>' . esc_html($r->email) . '</td>'
                 . '<td>' . esc_html($r->login) . '</td>'
                 . '<td>' . esc_html($r->pass_plain) . '</td>'
-                . '<td>' . esc_html($r->created) . '</td>'
+                . '<td>' . esc_html($time) . '</td>'
+                . '<td>' . implode(' | ', $actions) . '</td>'
                 . '</tr>';
         }
         echo '</tbody></table>';
@@ -213,7 +272,8 @@ function wcrq_registration_shortcode() {
                 'email' => $email,
                 'login' => $login,
                 'password' => wp_hash_password($password),
-                'pass_plain' => $password
+                'pass_plain' => $password,
+                'blocked' => 0
             ]);
 
             $subject = __('Dane logowania do quizu', 'wcrq');
@@ -262,6 +322,12 @@ function wcrq_quiz_shortcode() {
     // Check login
     if (empty($_SESSION['wcrq_participant'])) {
         return wcrq_login_form();
+    }
+    global $wpdb;
+    $ptable = $wpdb->prefix . 'wcrq_participants';
+    $blocked = $wpdb->get_var($wpdb->prepare("SELECT blocked FROM $ptable WHERE id = %d", $_SESSION['wcrq_participant']));
+    if ($blocked) {
+        return '<p>' . __('Twoje konto zostało zablokowane.', 'wcrq') . '</p>';
     }
 
     // Check if quiz started
@@ -334,6 +400,10 @@ function wcrq_quiz_shortcode_process_login() {
         $pass = $_POST['wcrq_pass'] ?? '';
         $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE login = %s", $login));
         if ($row && wp_check_password($pass, $row->password)) {
+            if ($row->blocked) {
+                echo wcrq_login_form(__('Twoje konto zostało zablokowane.', 'wcrq'));
+                return false;
+            }
             $_SESSION['wcrq_participant'] = $row->id;
             return true;
         } else {
