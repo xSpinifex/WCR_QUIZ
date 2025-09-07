@@ -62,19 +62,35 @@ function wcrq_activate() {
 }
 register_activation_hook(__FILE__, 'wcrq_activate');
 
-function wcrq_maybe_add_blocked_column() {
+function wcrq_maybe_update_participants_table() {
     global $wpdb;
     $table = $wpdb->prefix . 'wcrq_participants';
     $table_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $table));
     if ($table_exists !== $table) {
         return;
     }
-    $exists = $wpdb->get_results($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'blocked'));
-    if (!$exists) {
+    $blocked_exists = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'blocked'));
+    if (!$blocked_exists) {
         $wpdb->query("ALTER TABLE $table ADD blocked tinyint(1) NOT NULL DEFAULT 0");
     }
+    $pass_plain_exists = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'pass_plain'));
+    if (!$pass_plain_exists) {
+        $wpdb->query("ALTER TABLE $table ADD pass_plain varchar(255) NOT NULL DEFAULT ''");
+    }
 }
-add_action('plugins_loaded', 'wcrq_maybe_add_blocked_column');
+add_action('plugins_loaded', 'wcrq_maybe_update_participants_table');
+
+function wcrq_maybe_create_tables() {
+    global $wpdb;
+    $participants_table = $wpdb->prefix . 'wcrq_participants';
+    $results_table = $wpdb->prefix . 'wcrq_results';
+    $p_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $participants_table));
+    $r_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $results_table));
+    if ($p_exists !== $participants_table || $r_exists !== $results_table) {
+        wcrq_activate();
+    }
+}
+add_action('plugins_loaded', 'wcrq_maybe_create_tables');
 
 // Settings page
 function wcrq_register_settings() {
@@ -265,7 +281,7 @@ function wcrq_registration_shortcode() {
                 $exists = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table WHERE login = %s", $login));
             } while ($exists);
             $password = wp_generate_password(8, false);
-            $wpdb->insert($table, [
+            $inserted = $wpdb->insert($table, [
                 'school' => $school,
                 'name' => $name,
                 'class' => $class,
@@ -276,16 +292,23 @@ function wcrq_registration_shortcode() {
                 'blocked' => 0
             ]);
 
-            $subject = __('Dane logowania do quizu', 'wcrq');
-            $body = sprintf(
-                __('Szanowny Użytkowniku,<br><br>z radością informujemy, że Twoje konto w WCR Quiz zostało pomyślnie utworzone.<br><br><strong>Dane logowania:</strong><br>• Login: %1$s<br>• Hasło: %2$s <br><br>W razie pytań lub problemów nasi konsultanci chętnie pomogą.<br><br>Z wyrazami szacunku,<br>Zespół WCR Quiz', 'wcrq'),
-                esc_html($login),
-                esc_html($password)
-            );
-            $headers = ['Content-Type: text/html; charset=UTF-8'];
-            wp_mail($email, $subject, $body, $headers);
+            if ($inserted === false) {
+                $output .= '<p>' . __('Wystąpił błąd podczas rejestracji. Spróbuj ponownie później.', 'wcrq') . '</p>';
+                if (!empty($wpdb->last_error)) {
+                    $output .= '<p><small>' . esc_html($wpdb->last_error) . '</small></p>';
+                }
+            } else {
+                $subject = __('Dane logowania do quizu', 'wcrq');
+                $body = sprintf(
+                    __('Szanowny Użytkowniku,<br><br>z radością informujemy, że Twoje konto w WCR Quiz zostało pomyślnie utworzone.<br><br><strong>Dane logowania:</strong><br>• Login: %1$s<br>• Hasło: %2$s <br><br>W razie pytań lub problemów nasi konsultanci chętnie pomogą.<br><br>Z wyrazami szacunku,<br>Zespół WCR Quiz', 'wcrq'),
+                    esc_html($login),
+                    esc_html($password)
+                );
+                $headers = ['Content-Type: text/html; charset=UTF-8'];
+                wp_mail($email, $subject, $body, $headers);
 
-            $output .= '<p>' . __('Rejestracja zakończona sukcesem. Sprawdź e-mail.', 'wcrq') . '</p>';
+                $output .= '<p>' . __('Rejestracja zakończona sukcesem. Sprawdź e-mail.', 'wcrq') . '</p>';
+            }
         } else {
             $output .= '<p>' . __('Wszystkie pola są wymagane.', 'wcrq') . '</p>';
         }
