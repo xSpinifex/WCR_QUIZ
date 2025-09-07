@@ -19,7 +19,7 @@ W panelu administracyjnym w sekcji **Ustawienia → WCR Quiz** ustaw:
 - czy wynik ma być pokazany uczestnikowi.
 
 ## Shortcody
-- `[wcr_registration]` – formularz rejestracji (imię, e‑mail, login i hasło).
-- `[wcr_quiz]` – logowanie i udział w quizie.
+- `[wcr_registration]` – formularz rejestracji (nazwa szkoły, imię i nazwisko ucznia, klasa, e‑mail). Login i hasło generowane są automatycznie i wysyłane na e‑mail.
+- `[wcr_quiz]` – logowanie (login oraz hasło) i udział w quizie.
 
 Wersje testowane: WordPress 5.7.2, PHP 7.4.33.
