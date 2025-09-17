@@ -572,32 +572,35 @@ function wcrq_field_show_results() {
 }
 
 function wcrq_admin_scripts($hook) {
-    if ($hook === 'wcrq_page_wcrq_questions') {
-        // Media is required for adding images to questions
-        wp_enqueue_media();
-        wp_enqueue_style(
-            'wcrq-questions-admin',
-            plugins_url('assets/css/admin.css', __FILE__),
-            [],
-            '0.2'
-        );
-        wp_enqueue_script(
-            'wcrq-questions-admin',
-            plugins_url('assets/js/questions-admin.js', __FILE__),
-            [],
-            '0.1',
-            true
-        );
-        wp_localize_script(
-            'wcrq-questions-admin',
-            'wcrqQuestionsAdmin',
-            [
-                'chooseImage' => __('Wybierz obrazek', 'wcrq'),
-                'removeConfirmation' => __('Usunąć to pytanie?', 'wcrq'),
-                'minimumNotice' => __('Musisz zachować co najmniej jedno pytanie.', 'wcrq'),
-            ]
-        );
+    $page = isset($_GET['page']) ? sanitize_key(wp_unslash($_GET['page'])) : '';
+    if ($page !== 'wcrq_questions') {
+        return;
     }
+
+    // Media is required for adding images to questions
+    wp_enqueue_media();
+    wp_enqueue_style(
+        'wcrq-questions-admin',
+        plugins_url('assets/css/admin.css', __FILE__),
+        [],
+        '0.2'
+    );
+    wp_enqueue_script(
+        'wcrq-questions-admin',
+        plugins_url('assets/js/questions-admin.js', __FILE__),
+        [],
+        '0.1',
+        true
+    );
+    wp_localize_script(
+        'wcrq-questions-admin',
+        'wcrqQuestionsAdmin',
+        [
+            'chooseImage' => __('Wybierz obrazek', 'wcrq'),
+            'removeConfirmation' => __('Usunąć to pytanie?', 'wcrq'),
+            'minimumNotice' => __('Musisz zachować co najmniej jedno pytanie.', 'wcrq'),
+        ]
+    );
 }
 add_action('admin_enqueue_scripts', 'wcrq_admin_scripts');
 
