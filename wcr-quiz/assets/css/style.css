@@ -150,3 +150,18 @@
 .wcrq-no-js .wcrq-question-nav {
     display: none;
 }
+
+.wcrq-countdown {
+    margin-top: 1.5rem;
+    font-weight: 700;
+    font-size: 1.5rem;
+    text-align: center;
+    color: #166534;
+}
+
+.wcrq-timezone-note {
+    margin-top: 1rem;
+    font-size: 0.95rem;
+    color: #555;
+    text-align: center;
+}
