@@ -463,10 +463,13 @@ function wcrq_admin_scripts($hook) {
         wp_enqueue_script(
             'wcrq-questions-builder',
             plugins_url('assets/js/questions-builder.js', __FILE__),
-            ['jquery'],
-            '0.2',
+            ['jquery', 'wp-i18n'],
+            '0.3',
             true
         );
+        if (function_exists('wp_set_script_translations')) {
+            wp_set_script_translations('wcrq-questions-builder', 'wcrq');
+        }
     }
 }
 add_action('admin_enqueue_scripts', 'wcrq_admin_scripts');
