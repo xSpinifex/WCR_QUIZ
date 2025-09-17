@@ -160,7 +160,7 @@ function wcrq_sanitize_settings($input) {
 
     $questions = [];
 
-    if (!empty($input['questions'])) {
+    if (isset($input['questions'])) {
         $raw = wp_unslash($input['questions']);
         $decoded = json_decode($raw, true);
         if (is_array($decoded)) {
@@ -171,7 +171,9 @@ function wcrq_sanitize_settings($input) {
                 }
             }
         }
-    } elseif (!empty($input['questions_nojs']) && is_array($input['questions_nojs'])) {
+    }
+
+    if (empty($questions) && !empty($input['questions_nojs']) && is_array($input['questions_nojs'])) {
         foreach ($input['questions_nojs'] as $question) {
             $prepared = wcrq_prepare_question_data($question);
             if ($prepared) {
