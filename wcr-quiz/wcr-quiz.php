@@ -112,6 +112,7 @@ add_action('admin_init', 'wcrq_register_settings');
 function wcrq_admin_menu() {
     add_menu_page('WCR Quiz', 'WCR Quiz', 'manage_options', 'wcrq', 'wcrq_settings_page_html', 'dashicons-welcome-learn-more', 20);
     add_submenu_page('wcrq', __('Ustawienia quizu', 'wcrq'), __('Ustawienia quizu', 'wcrq'), 'manage_options', 'wcrq', 'wcrq_settings_page_html');
+    add_submenu_page('wcrq', __('Pytania', 'wcrq'), __('Pytania', 'wcrq'), 'manage_options', 'wcrq_questions', 'wcrq_questions_page_html');
     add_submenu_page('wcrq', __('Rejestracje', 'wcrq'), __('Rejestracje', 'wcrq'), 'manage_options', 'wcrq_registrations', 'wcrq_registrations_page_html');
     add_submenu_page('wcrq', __('Wyniki', 'wcrq'), __('Wyniki', 'wcrq'), 'manage_options', 'wcrq_results', 'wcrq_results_page_html');
 }
@@ -234,6 +235,170 @@ function wcrq_get_saved_questions() {
     }
 
     return $questions;
+}
+
+function wcrq_questions_page_html() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    $options = get_option('wcrq_settings', []);
+    $stored = $options['questions'] ?? [];
+    if (is_string($stored)) {
+        $decoded = json_decode($stored, true);
+        $stored = is_array($decoded) ? $decoded : [];
+    }
+    if (!is_array($stored)) {
+        $stored = [];
+    }
+
+    $message = '';
+    $message_class = 'updated';
+
+    if (!empty($_POST['wcrq_questions_nonce']) && wp_verify_nonce($_POST['wcrq_questions_nonce'], 'wcrq_questions_action')) {
+        $action = $_POST['wcrq_action'] ?? '';
+        if ($action === 'add') {
+            $raw_question = [
+                'question' => $_POST['wcrq_question'] ?? '',
+                'answers' => [
+                    $_POST['wcrq_answer_0'] ?? '',
+                    $_POST['wcrq_answer_1'] ?? '',
+                    $_POST['wcrq_answer_2'] ?? '',
+                    $_POST['wcrq_answer_3'] ?? '',
+                ],
+                'correct' => $_POST['wcrq_correct'] ?? 0,
+                'image' => $_POST['wcrq_image'] ?? '',
+            ];
+
+            $prepared = wcrq_prepare_question_data($raw_question);
+
+            if ($prepared) {
+                $stored[] = $prepared;
+                $options['questions'] = array_values($stored);
+                update_option('wcrq_settings', $options);
+                $message = __('Pytanie zostało dodane.', 'wcrq');
+            } else {
+                $message = __('Nie udało się dodać pytania. Upewnij się, że podałeś treść pytania i odpowiedzi.', 'wcrq');
+                $message_class = 'error';
+            }
+        } elseif ($action === 'delete') {
+            $index = isset($_POST['wcrq_question_index']) ? intval($_POST['wcrq_question_index']) : -1;
+            if ($index >= 0 && $index < count($stored)) {
+                array_splice($stored, $index, 1);
+                $options['questions'] = array_values($stored);
+                update_option('wcrq_settings', $options);
+                $message = __('Pytanie zostało usunięte.', 'wcrq');
+            } else {
+                $message = __('Nie udało się usunąć pytania.', 'wcrq');
+                $message_class = 'error';
+            }
+        }
+
+        // Refresh stored data after modifications
+        $options = get_option('wcrq_settings', []);
+        $stored = $options['questions'] ?? [];
+        if (is_string($stored)) {
+            $decoded = json_decode($stored, true);
+            $stored = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($stored)) {
+            $stored = [];
+        }
+    }
+
+    $questions = [];
+    foreach ($stored as $question) {
+        $prepared = wcrq_prepare_question_data($question, false);
+        if ($prepared) {
+            $questions[] = $prepared;
+        }
+    }
+
+    ?>
+    <div class="wrap">
+        <h1><?php esc_html_e('Pytania', 'wcrq'); ?></h1>
+        <?php if ($message) : ?>
+            <div class="<?php echo esc_attr($message_class); ?>">
+                <p><?php echo esc_html($message); ?></p>
+            </div>
+        <?php endif; ?>
+
+        <h2><?php esc_html_e('Dodaj nowe pytanie', 'wcrq'); ?></h2>
+        <form method="post" action="<?php echo esc_url(admin_url('admin.php?page=wcrq_questions')); ?>">
+            <?php wp_nonce_field('wcrq_questions_action', 'wcrq_questions_nonce'); ?>
+            <input type="hidden" name="wcrq_action" value="add" />
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="wcrq_question"><?php esc_html_e('Treść pytania', 'wcrq'); ?></label></th>
+                    <td><textarea id="wcrq_question" name="wcrq_question" rows="3" cols="60" required></textarea></td>
+                </tr>
+                <tr>
+                    <th scope="row"><?php esc_html_e('Odpowiedzi', 'wcrq'); ?></th>
+                    <td>
+                        <?php for ($i = 0; $i < 4; $i++) : ?>
+                            <p>
+                                <label>
+                                    <input type="radio" name="wcrq_correct" value="<?php echo esc_attr($i); ?>" <?php checked(0, $i); ?> />
+                                    <input type="text" name="wcrq_answer_<?php echo esc_attr($i); ?>" value="" class="regular-text" required />
+                                    <span class="description"><?php esc_html_e('Zaznacz poprawną odpowiedź.', 'wcrq'); ?></span>
+                                </label>
+                            </p>
+                        <?php endfor; ?>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="wcrq_image"><?php esc_html_e('URL obrazu (opcjonalnie)', 'wcrq'); ?></label></th>
+                    <td><input type="url" id="wcrq_image" name="wcrq_image" value="" class="regular-text" /></td>
+                </tr>
+            </table>
+            <?php submit_button(__('Dodaj pytanie', 'wcrq')); ?>
+        </form>
+
+        <h2><?php esc_html_e('Lista pytań', 'wcrq'); ?></h2>
+        <?php if ($questions) : ?>
+            <table class="widefat fixed striped">
+                <thead>
+                    <tr>
+                        <th><?php esc_html_e('Pytanie', 'wcrq'); ?></th>
+                        <th><?php esc_html_e('Odpowiedzi', 'wcrq'); ?></th>
+                        <th><?php esc_html_e('Poprawna', 'wcrq'); ?></th>
+                        <th><?php esc_html_e('Akcje', 'wcrq'); ?></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($questions as $idx => $question) : ?>
+                        <tr>
+                            <td>
+                                <strong><?php echo esc_html($question['question']); ?></strong>
+                                <?php if (!empty($question['image'])) : ?>
+                                    <p><a href="<?php echo esc_url($question['image']); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Podgląd obrazu', 'wcrq'); ?></a></p>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <ol>
+                                    <?php foreach ($question['answers'] as $answer) : ?>
+                                        <li><?php echo esc_html($answer); ?></li>
+                                    <?php endforeach; ?>
+                                </ol>
+                            </td>
+                            <td><?php echo esc_html($question['answers'][$question['correct']] ?? ''); ?></td>
+                            <td>
+                                <form method="post" action="<?php echo esc_url(admin_url('admin.php?page=wcrq_questions')); ?>" onsubmit="return confirm('<?php echo esc_js(__('Czy na pewno usunąć to pytanie?', 'wcrq')); ?>');">
+                                    <?php wp_nonce_field('wcrq_questions_action', 'wcrq_questions_nonce'); ?>
+                                    <input type="hidden" name="wcrq_action" value="delete" />
+                                    <input type="hidden" name="wcrq_question_index" value="<?php echo esc_attr($idx); ?>" />
+                                    <?php submit_button(__('Usuń', 'wcrq'), 'delete', 'submit', false); ?>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php else : ?>
+            <p><?php esc_html_e('Brak pytań.', 'wcrq'); ?></p>
+        <?php endif; ?>
+    </div>
+    <?php
 }
 
 function wcrq_settings_page_html() {
