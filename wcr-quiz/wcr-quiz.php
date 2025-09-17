@@ -94,7 +94,7 @@ add_action('plugins_loaded', 'wcrq_maybe_create_tables');
 
 // Settings page
 function wcrq_register_settings() {
-    register_setting('wcrq_settings', 'wcrq_settings');
+    register_setting('wcrq_settings', 'wcrq_settings', 'wcrq_sanitize_settings');
 
     add_settings_section('wcrq_main', __('Ustawienia quizu', 'wcrq'), '__return_false', 'wcrq');
 
@@ -117,6 +117,104 @@ function wcrq_admin_menu() {
     add_submenu_page('wcrq', __('Wyniki', 'wcrq'), __('Wyniki', 'wcrq'), 'manage_options', 'wcrq_results', 'wcrq_results_page_html');
 }
 add_action('admin_menu', 'wcrq_admin_menu');
+
+function wcrq_get_polish_timezone() {
+    try {
+        return new DateTimeZone('Europe/Warsaw');
+    } catch (Exception $e) {
+        return wp_timezone();
+    }
+}
+
+function wcrq_parse_datetime_local($value) {
+    if (empty($value)) {
+        return 0;
+    }
+
+    $tz = wcrq_get_polish_timezone();
+    $value = wp_unslash($value);
+
+    $formats = ['Y-m-d\TH:i', DateTimeInterface::ATOM];
+    foreach ($formats as $format) {
+        $dt = DateTime::createFromFormat($format, $value, $tz);
+        if ($dt instanceof DateTime) {
+            return $dt->getTimestamp();
+        }
+    }
+
+    $timestamp = strtotime($value);
+    return $timestamp ? $timestamp : 0;
+}
+
+function wcrq_sanitize_settings($input) {
+    $output = get_option('wcrq_settings', []);
+
+    $output['start_time'] = isset($input['start_time']) ? sanitize_text_field(wp_unslash($input['start_time'])) : '';
+    $output['end_time'] = isset($input['end_time']) ? sanitize_text_field(wp_unslash($input['end_time'])) : '';
+    $output['pre_start_text'] = isset($input['pre_start_text']) ? wp_kses_post(wp_unslash($input['pre_start_text'])) : '';
+    $output['pre_quiz_text'] = isset($input['pre_quiz_text']) ? wp_kses_post(wp_unslash($input['pre_quiz_text'])) : '';
+    $output['post_quiz_text'] = isset($input['post_quiz_text']) ? wp_kses_post(wp_unslash($input['post_quiz_text'])) : '';
+    $output['randomize_questions'] = !empty($input['randomize_questions']) ? 1 : 0;
+    $output['allow_navigation'] = !empty($input['allow_navigation']) ? 1 : 0;
+    $output['show_results'] = !empty($input['show_results']) ? 1 : 0;
+
+    $questions = [];
+
+    if (!empty($input['questions'])) {
+        $raw = wp_unslash($input['questions']);
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded)) {
+            foreach ($decoded as $question) {
+                $prepared = wcrq_prepare_question_data($question);
+                if ($prepared) {
+                    $questions[] = $prepared;
+                }
+            }
+        }
+    } elseif (!empty($input['questions_nojs']) && is_array($input['questions_nojs'])) {
+        foreach ($input['questions_nojs'] as $question) {
+            $prepared = wcrq_prepare_question_data($question);
+            if ($prepared) {
+                $questions[] = $prepared;
+            }
+        }
+    }
+
+    $output['questions'] = wp_json_encode($questions);
+
+    return $output;
+}
+
+function wcrq_prepare_question_data($question) {
+    $question_text = isset($question['question']) ? sanitize_text_field(wp_unslash($question['question'])) : '';
+    $answers = [];
+
+    if (!empty($question['answers']) && is_array($question['answers'])) {
+        foreach ($question['answers'] as $answer) {
+            $answers[] = sanitize_text_field(wp_unslash($answer));
+        }
+    }
+
+    $answers = array_pad($answers, 4, '');
+    $correct = isset($question['correct']) ? intval($question['correct']) : 0;
+    if ($correct < 0 || $correct > 3) {
+        $correct = 0;
+    }
+
+    $image = isset($question['image']) ? esc_url_raw(wp_unslash($question['image'])) : '';
+
+    $has_content = $question_text !== '' || array_filter($answers);
+    if (!$has_content) {
+        return null;
+    }
+
+    return [
+        'question' => $question_text,
+        'answers' => array_slice($answers, 0, 4),
+        'correct' => $correct,
+        'image' => $image,
+    ];
+}
 
 function wcrq_settings_page_html() {
     if (!current_user_can('manage_options')) {
@@ -260,12 +358,14 @@ function wcrq_field_start_time() {
     $options = get_option('wcrq_settings');
     $value = isset($options['start_time']) ? esc_attr($options['start_time']) : '';
     echo '<input type="datetime-local" name="wcrq_settings[start_time]" value="' . $value . '" />';
+    echo '<p class="description">' . esc_html__('Czas interpretowany jest według strefy czasowej: Europa/Warszawa.', 'wcrq') . '</p>';
 }
 
 function wcrq_field_end_time() {
     $options = get_option('wcrq_settings');
     $value = isset($options['end_time']) ? esc_attr($options['end_time']) : '';
     echo '<input type="datetime-local" name="wcrq_settings[end_time]" value="' . $value . '" />';
+    echo '<p class="description">' . esc_html__('Czas interpretowany jest według strefy czasowej: Europa/Warszawa.', 'wcrq') . '</p>';
 }
 
 function wcrq_field_pre_start_text() {
@@ -300,9 +400,54 @@ function wcrq_field_allow_navigation() {
 
 function wcrq_field_questions() {
     $options = get_option('wcrq_settings');
-    $value = isset($options['questions']) ? esc_attr($options['questions']) : '[]';
+    $value = isset($options['questions']) ? $options['questions'] : '[]';
+    if (!is_string($value)) {
+        $value = wp_json_encode($value);
+    }
+    $encoded_value = esc_attr($value);
+    $questions = json_decode($value, true);
+    if (!is_array($questions)) {
+        $questions = [];
+    }
+
     echo '<div id="wcrq-questions-builder"></div>';
-    echo '<input type="hidden" id="wcrq_questions_input" name="wcrq_settings[questions]" value="' . $value . '" />';
+    echo '<input type="hidden" id="wcrq_questions_input" name="wcrq_settings[questions]" value="' . $encoded_value . '" />';
+
+    $fallback_questions = $questions;
+    $fallback_questions[] = [
+        'question' => '',
+        'answers' => ['', '', '', ''],
+        'correct' => 0,
+        'image' => '',
+    ];
+
+    echo '<div class="wcrq-questions-fallback">';
+    echo '<p class="description">' . esc_html__('Jeżeli edytor wizualny nie jest widoczny, możesz uzupełnić pytania w poniższym formularzu.', 'wcrq') . '</p>';
+
+    foreach ($fallback_questions as $idx => $question) {
+        $question_text = isset($question['question']) ? esc_attr($question['question']) : '';
+        $answers = isset($question['answers']) && is_array($question['answers']) ? $question['answers'] : ['', '', '', ''];
+        $answers = array_pad($answers, 4, '');
+        $image = isset($question['image']) ? esc_attr($question['image']) : '';
+        $correct = isset($question['correct']) ? intval($question['correct']) : 0;
+
+        echo '<fieldset class="wcrq-question-fallback">';
+        echo '<legend>' . sprintf(esc_html__('Pytanie %d', 'wcrq'), $idx + 1) . '</legend>';
+        echo '<p><label>' . esc_html__('Treść pytania', 'wcrq') . '<br /><input type="text" name="wcrq_settings[questions_nojs][' . intval($idx) . '][question]" value="' . $question_text . '" class="regular-text" /></label></p>';
+        echo '<p><label>' . esc_html__('Adres obrazka (opcjonalnie)', 'wcrq') . '<br /><input type="url" name="wcrq_settings[questions_nojs][' . intval($idx) . '][image]" value="' . $image . '" class="regular-text" /></label></p>';
+        echo '<div class="wcrq-fallback-answers">';
+        echo '<p><strong>' . esc_html__('Odpowiedzi', 'wcrq') . '</strong></p>';
+        for ($a = 0; $a < 4; $a++) {
+            $answer_value = esc_attr($answers[$a]);
+            $radio_name = 'wcrq_settings[questions_nojs][' . intval($idx) . '][correct]';
+            $answer_name = 'wcrq_settings[questions_nojs][' . intval($idx) . '][answers][' . $a . ']';
+            echo '<p><label><input type="radio" name="' . $radio_name . '" value="' . $a . '"' . checked($correct, $a, false) . ' /> <input type="text" name="' . $answer_name . '" value="' . $answer_value . '" class="regular-text" /></label></p>';
+        }
+        echo '</div>';
+        echo '</fieldset>';
+    }
+
+    echo '</div>';
 }
 
 function wcrq_field_show_results() {
@@ -425,13 +570,17 @@ add_shortcode('wcr_registration', 'wcrq_registration_shortcode');
 // Quiz shortcode
 function wcrq_quiz_shortcode() {
     $options = get_option('wcrq_settings');
-    $start_time = !empty($options['start_time']) ? strtotime($options['start_time']) : 0;
-    $end_time = !empty($options['end_time']) ? strtotime($options['end_time']) : 0;
+    $start_time = !empty($options['start_time']) ? wcrq_parse_datetime_local($options['start_time']) : 0;
+    $end_time = !empty($options['end_time']) ? wcrq_parse_datetime_local($options['end_time']) : 0;
     $now = current_time('timestamp');
 
     if ($start_time && $now < $start_time) {
+        wp_enqueue_script('wcrq-countdown', plugins_url('assets/js/countdown.js', __FILE__), [], '0.1', true);
         $text = !empty($options['pre_start_text']) ? wpautop(wp_kses_post($options['pre_start_text'])) : '<p>' . esc_html__('Quiz jeszcze się nie rozpoczął.', 'wcrq') . '</p>';
-        return '<div class="wcrq-pre-quiz">' . $text . '</div>';
+        $remaining = max(0, $start_time - $now);
+        $countdown = '<div class="wcrq-countdown" data-countdown-seconds="' . esc_attr($remaining) . '">' . esc_html__('Do rozpoczęcia pozostało:', 'wcrq') . ' <span class="wcrq-countdown-time">00:00:00</span></div>';
+        $timezone_note = '<p class="wcrq-timezone-note">' . esc_html__('Czas liczony jest według strefy czasowej: Europa/Warszawa.', 'wcrq') . '</p>';
+        return '<div class="wcrq-pre-quiz wcrq-pre-countdown">' . $text . $countdown . $timezone_note . '</div>';
     }
 
     if ($end_time && $now > $end_time) {

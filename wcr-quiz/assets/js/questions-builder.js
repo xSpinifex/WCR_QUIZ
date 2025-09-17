@@ -1,6 +1,13 @@
 jQuery(function($){
   const container = $('#wcrq-questions-builder');
   const input = $('#wcrq_questions_input');
+  const fallback = $('.wcrq-questions-fallback');
+
+  if(!container.length || !input.length){
+    return;
+  }
+
+  fallback.hide();
 
   function addQuestion(q){
     const index = container.children('.wcrq-question').length;
