@@ -167,26 +167,6 @@ function wcrq_sanitize_settings($input) {
                 $questions[] = $prepared;
             }
         }
-    } elseif (!empty($input['questions']) && is_string($input['questions'])) {
-        $raw = wp_unslash($input['questions']);
-        $decoded = json_decode($raw, true);
-        if (is_array($decoded)) {
-            foreach ($decoded as $question) {
-                $prepared = wcrq_prepare_question_data($question, false);
-                if ($prepared) {
-                    $questions[] = $prepared;
-                }
-            }
-        }
-    }
-
-    if (empty($questions) && !empty($input['questions_nojs']) && is_array($input['questions_nojs'])) {
-        foreach ($input['questions_nojs'] as $question) {
-            $prepared = wcrq_prepare_question_data($question);
-            if ($prepared) {
-                $questions[] = $prepared;
-            }
-        }
     }
 
     $output['questions'] = $questions;
@@ -301,18 +281,142 @@ function wcrq_questions_page_html() {
     if (!current_user_can('manage_options')) {
         return;
     }
+    if (isset($_GET['settings-updated'])) {
+        add_settings_error(
+            'wcrq_questions',
+            'settings_updated',
+            __('Pytania zostały zaktualizowane.', 'wcrq'),
+            'updated'
+        );
+    }
+
+    $questions = wcrq_get_saved_questions();
+    if (empty($questions)) {
+        $questions = [wcrq_get_blank_question()];
+    }
     ?>
     <div class="wrap">
         <h1><?php esc_html_e('Pytania quizu', 'wcrq'); ?></h1>
-        <p class="description"><?php esc_html_e('Każde pytanie będzie wyświetlane w osobnej zakładce.', 'wcrq'); ?></p>
-        <form action="options.php" method="post">
-            <?php
-            settings_fields('wcrq_settings');
-            wcrq_field_questions();
-            ?>
-            <?php submit_button(); ?>
+        <?php settings_errors('wcrq_questions'); ?>
+        <p class="description">
+            <?php esc_html_e('Zdefiniuj pytania oraz cztery odpowiedzi. Zaznacz poprawną odpowiedź dla każdego pytania.', 'wcrq'); ?>
+        </p>
+        <form action="options.php" method="post" id="wcrq-questions-form">
+            <?php settings_fields('wcrq_settings'); ?>
+            <div class="wcrq-question-list">
+                <?php foreach ($questions as $idx => $question) { ?>
+                    <?php wcrq_render_question_editor($idx, $question); ?>
+                <?php } ?>
+            </div>
+            <p>
+                <button type="button" class="button button-secondary" id="wcrq-add-question">
+                    <?php esc_html_e('Dodaj pytanie', 'wcrq'); ?>
+                </button>
+            </p>
+            <?php submit_button(__('Zapisz pytania', 'wcrq')); ?>
         </form>
+        <template id="wcrq-question-template">
+            <?php wcrq_render_question_editor('__index__', wcrq_get_blank_question(), true); ?>
+        </template>
     </div>
+    <?php
+}
+
+function wcrq_render_question_editor($index, $question, $is_template = false) {
+    $index_attr = $is_template ? $index : intval($index);
+    $number_display = is_numeric($index_attr) ? intval($index_attr) + 1 : '#';
+    $question_text = isset($question['question']) ? esc_textarea($question['question']) : '';
+    $answers = isset($question['answers']) && is_array($question['answers']) ? $question['answers'] : [];
+    $answers = array_pad($answers, 4, '');
+    $correct = isset($question['correct']) ? intval($question['correct']) : 0;
+    if ($correct < 0 || $correct > 3) {
+        $correct = 0;
+    }
+    $image = isset($question['image']) ? esc_url($question['image']) : '';
+    ?>
+    <fieldset class="wcrq-question-item" data-index="<?php echo esc_attr($index_attr); ?>">
+        <legend>
+            <?php
+            printf(
+                esc_html__('Pytanie %s', 'wcrq'),
+                '<span class="wcrq-question-number">' . esc_html($number_display) . '</span>'
+            );
+            ?>
+        </legend>
+        <div class="wcrq-question-body">
+            <div class="wcrq-field">
+                <label for="wcrq_questions_<?php echo esc_attr($index_attr); ?>_question">
+                    <?php esc_html_e('Treść pytania', 'wcrq'); ?>
+                </label>
+                <textarea id="wcrq_questions_<?php echo esc_attr($index_attr); ?>_question" name="wcrq_settings[questions][<?php echo esc_attr($index_attr); ?>][question]" rows="3" class="large-text"><?php echo $question_text; ?></textarea>
+            </div>
+            <div class="wcrq-field wcrq-field-image">
+                <label for="wcrq_questions_<?php echo esc_attr($index_attr); ?>_image">
+                    <?php esc_html_e('Adres obrazka (opcjonalnie)', 'wcrq'); ?>
+                </label>
+                <input
+                    type="url"
+                    id="wcrq_questions_<?php echo esc_attr($index_attr); ?>_image"
+                    name="wcrq_settings[questions][<?php echo esc_attr($index_attr); ?>][image]"
+                    value="<?php echo esc_attr($image); ?>"
+                    class="regular-text"
+                    placeholder="https://"
+                />
+                <div class="wcrq-image-actions">
+                    <button type="button" class="button wcrq-select-image">
+                        <?php esc_html_e('Wybierz obrazek', 'wcrq'); ?>
+                    </button>
+                    <button type="button" class="button-link wcrq-clear-image">
+                        <?php esc_html_e('Usuń obrazek', 'wcrq'); ?>
+                    </button>
+                </div>
+                <div class="wcrq-image-preview">
+                    <?php if ($image) { ?>
+                        <img src="<?php echo esc_url($image); ?>" alt="" />
+                    <?php } ?>
+                </div>
+            </div>
+            <div class="wcrq-answers">
+                <p class="description">
+                    <?php esc_html_e('Wpisz cztery możliwe odpowiedzi i zaznacz poprawną.', 'wcrq'); ?>
+                </p>
+                <?php for ($a = 0; $a < 4; $a++) { ?>
+                    <?php
+                    $answer_value = esc_attr($answers[$a]);
+                    $answer_id = 'wcrq_questions_' . $index_attr . '_answer_' . $a;
+                    ?>
+                    <div class="wcrq-answer-row">
+                        <span class="wcrq-answer-radio">
+                            <input
+                                type="radio"
+                                name="wcrq_settings[questions][<?php echo esc_attr($index_attr); ?>][correct]"
+                                value="<?php echo esc_attr($a); ?>"
+                                <?php checked($correct, $a); ?>
+                            />
+                        </span>
+                        <label class="wcrq-answer-text" for="<?php echo esc_attr($answer_id); ?>">
+                            <span class="screen-reader-text">
+                                <?php printf(esc_html__('Odpowiedź %s', 'wcrq'), esc_html(chr(65 + $a))); ?>
+                            </span>
+                            <input
+                                type="text"
+                                id="<?php echo esc_attr($answer_id); ?>"
+                                name="wcrq_settings[questions][<?php echo esc_attr($index_attr); ?>][answers][<?php echo esc_attr($a); ?>]"
+                                value="<?php echo $answer_value; ?>"
+                                class="regular-text"
+                                placeholder="<?php printf(esc_attr__('Odpowiedź %s', 'wcrq'), chr(65 + $a)); ?>"
+                            />
+                        </label>
+                    </div>
+                <?php } ?>
+            </div>
+        </div>
+        <div class="wcrq-question-actions">
+            <button type="button" class="button button-link-delete wcrq-remove-question">
+                <?php esc_html_e('Usuń pytanie', 'wcrq'); ?>
+            </button>
+        </div>
+    </fieldset>
     <?php
 }
 
@@ -461,118 +565,6 @@ function wcrq_field_allow_navigation() {
     echo '<label><input type="checkbox" name="wcrq_settings[allow_navigation]" value="1"' . checked(1, $checked, false) . ' /> ' . esc_html__('Pozwól uczestnikom wracać do poprzednich pytań.', 'wcrq') . '</label>';
 }
 
-function wcrq_render_question_fieldset($index, $question, $is_template = false) {
-    $index_attr = $is_template ? '__index__' : intval($index);
-    $number = $is_template ? '{{number}}' : intval($index) + 1;
-    $name_prefix_actual = 'wcrq_settings[questions][' . $index_attr . ']';
-    $name_prefix_template = 'wcrq_settings[questions][__index__]';
-    $answers = isset($question['answers']) && is_array($question['answers']) ? $question['answers'] : ['', '', '', ''];
-    $answers = array_pad($answers, 4, '');
-    $correct = isset($question['correct']) ? intval($question['correct']) : 0;
-    $classes = ['wcrq-question-item'];
-    if ($is_template) {
-        $classes[] = 'wcrq-question-item-template';
-    }
-
-    echo '<fieldset class="' . esc_attr(implode(' ', $classes)) . '" data-index="' . esc_attr($index_attr) . '">';
-    echo '<legend>' . esc_html__('Pytanie', 'wcrq') . ' <span class="wcrq-question-number">' . esc_html($number) . '</span></legend>';
-
-    echo '<div class="wcrq-question-fields">';
-    echo '<p class="wcrq-field"><label>' . esc_html__('Treść pytania', 'wcrq') . '<br />';
-    echo '<input type="text" class="regular-text wcrq-q" name="' . esc_attr($name_prefix_actual . '[question]') . '" value="' . esc_attr($question['question'] ?? '') . '" data-name-template="' . esc_attr($name_prefix_template . '[question]') . '" />';
-    echo '</label></p>';
-
-    echo '<div class="wcrq-field wcrq-field-image">';
-    echo '<label>' . esc_html__('Adres obrazka (opcjonalnie)', 'wcrq') . '<br />';
-    echo '<input type="url" class="regular-text wcrq-img" name="' . esc_attr($name_prefix_actual . '[image]') . '" value="' . esc_attr($question['image'] ?? '') . '" data-name-template="' . esc_attr($name_prefix_template . '[image]') . '" />';
-    echo '</label>';
-    echo '<div class="wcrq-image-preview">';
-    if (!empty($question['image'])) {
-        echo '<img src="' . esc_url($question['image']) . '" alt="" />';
-    }
-    echo '</div>';
-    echo '<p class="wcrq-image-actions">';
-    echo '<button type="button" class="button wcrq-select-image">' . esc_html__('Wybierz grafikę', 'wcrq') . '</button> ';
-    echo '<button type="button" class="button wcrq-remove-image">' . esc_html__('Usuń grafikę', 'wcrq') . '</button>';
-    echo '</p>';
-    echo '</div>';
-    echo '</div>';
-
-    echo '<div class="wcrq-answers">';
-    echo '<p><strong>' . esc_html__('Odpowiedzi', 'wcrq') . '</strong></p>';
-    for ($a = 0; $a < 4; $a++) {
-        $answer_value = esc_attr($answers[$a]);
-        echo '<p class="wcrq-answer-row"><label>';
-        echo '<input type="radio" class="wcrq-correct" name="' . esc_attr($name_prefix_actual . '[correct]') . '" value="' . $a . '" data-name-template="' . esc_attr($name_prefix_template . '[correct]') . '"' . checked($correct, $a, false) . ' /> ';
-        echo '<input type="text" class="regular-text wcrq-a" name="' . esc_attr($name_prefix_actual . '[answers][' . $a . ']') . '" value="' . $answer_value . '" data-name-template="' . esc_attr($name_prefix_template . '[answers][' . $a . ']') . '" />';
-        echo '</label></p>';
-    }
-    echo '</div>';
-
-    echo '<p class="wcrq-question-actions">';
-    echo '<button type="button" class="button wcrq-preview">' . esc_html__('Podgląd', 'wcrq') . '</button> ';
-    echo '<button type="button" class="button button-link-delete wcrq-remove">' . esc_html__('Usuń pytanie', 'wcrq') . '</button>';
-    echo '</p>';
-    echo '<div class="wcrq-preview-area" style="display:none;"></div>';
-    echo '</fieldset>';
-}
-
-function wcrq_render_fallback_question($idx, $question) {
-    $question_text = esc_attr($question['question'] ?? '');
-    $answers = isset($question['answers']) && is_array($question['answers']) ? $question['answers'] : ['', '', '', ''];
-    $answers = array_pad($answers, 4, '');
-    $image = esc_attr($question['image'] ?? '');
-    $correct = isset($question['correct']) ? intval($question['correct']) : 0;
-
-    echo '<fieldset class="wcrq-question-fallback">';
-    echo '<legend>' . sprintf(esc_html__('Pytanie %d', 'wcrq'), intval($idx) + 1) . '</legend>';
-    echo '<p><label>' . esc_html__('Treść pytania', 'wcrq') . '<br /><input type="text" name="wcrq_settings[questions_nojs][' . intval($idx) . '][question]" value="' . $question_text . '" class="regular-text" /></label></p>';
-    echo '<p><label>' . esc_html__('Adres obrazka (opcjonalnie)', 'wcrq') . '<br /><input type="url" name="wcrq_settings[questions_nojs][' . intval($idx) . '][image]" value="' . $image . '" class="regular-text" /></label></p>';
-    echo '<div class="wcrq-fallback-answers">';
-    echo '<p><strong>' . esc_html__('Odpowiedzi', 'wcrq') . '</strong></p>';
-    for ($a = 0; $a < 4; $a++) {
-        $answer_value = esc_attr($answers[$a]);
-        $radio_name = 'wcrq_settings[questions_nojs][' . intval($idx) . '][correct]';
-        $answer_name = 'wcrq_settings[questions_nojs][' . intval($idx) . '][answers][' . $a . ']';
-        echo '<p><label><input type="radio" name="' . esc_attr($radio_name) . '" value="' . $a . '"' . checked($correct, $a, false) . ' /> <input type="text" name="' . esc_attr($answer_name) . '" value="' . $answer_value . '" class="regular-text" /></label></p>';
-    }
-    echo '</div>';
-    echo '</fieldset>';
-}
-
-function wcrq_field_questions() {
-    $questions = wcrq_get_saved_questions();
-    if (empty($questions)) {
-        $questions = [wcrq_get_blank_question()];
-    }
-
-    echo '<div id="wcrq-questions-app" class="wcrq-questions-app">';
-    echo '<p class="description">' . esc_html__('Dodaj pytania i odpowiedzi korzystając z edytora poniżej. Każde pytanie posiada cztery możliwe odpowiedzi.', 'wcrq') . '</p>';
-    echo '<div class="wcrq-question-list">';
-    foreach ($questions as $idx => $question) {
-        wcrq_render_question_fieldset($idx, $question);
-    }
-    echo '</div>';
-    echo '<p><button type="button" class="button button-primary" id="wcrq_add_question">' . esc_html__('Dodaj pytanie', 'wcrq') . '</button></p>';
-    echo '</div>';
-
-    $template_question = wcrq_get_blank_question();
-    ob_start();
-    wcrq_render_question_fieldset('__index__', $template_question, true);
-    $template_markup = ob_get_clean();
-    echo '<template id="wcrq-question-template">' . $template_markup . '</template>';
-
-    $fallback_questions = $questions;
-    $fallback_questions[] = wcrq_get_blank_question();
-
-    echo '<div class="wcrq-questions-fallback">';
-    echo '<p class="description">' . esc_html__('Jeżeli edytor wizualny nie jest widoczny, możesz uzupełnić pytania w poniższym formularzu.', 'wcrq') . '</p>';
-    foreach ($fallback_questions as $idx => $question) {
-        wcrq_render_fallback_question($idx, $question);
-    }
-    echo '</div>';
-}
-
 function wcrq_field_show_results() {
     $options = get_option('wcrq_settings');
     $checked = isset($options['show_results']) ? (bool)$options['show_results'] : false;
@@ -587,18 +579,24 @@ function wcrq_admin_scripts($hook) {
             'wcrq-questions-admin',
             plugins_url('assets/css/admin.css', __FILE__),
             [],
-            '0.1'
+            '0.2'
         );
         wp_enqueue_script(
-            'wcrq-questions-builder',
-            plugins_url('assets/js/questions-builder.js', __FILE__),
-            ['jquery', 'wp-i18n'],
-            '0.4',
+            'wcrq-questions-admin',
+            plugins_url('assets/js/questions-admin.js', __FILE__),
+            [],
+            '0.1',
             true
         );
-        if (function_exists('wp_set_script_translations')) {
-            wp_set_script_translations('wcrq-questions-builder', 'wcrq');
-        }
+        wp_localize_script(
+            'wcrq-questions-admin',
+            'wcrqQuestionsAdmin',
+            [
+                'chooseImage' => __('Wybierz obrazek', 'wcrq'),
+                'removeConfirmation' => __('Usunąć to pytanie?', 'wcrq'),
+                'minimumNotice' => __('Musisz zachować co najmniej jedno pytanie.', 'wcrq'),
+            ]
+        );
     }
 }
 add_action('admin_enqueue_scripts', 'wcrq_admin_scripts');
