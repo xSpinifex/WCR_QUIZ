@@ -2,18 +2,18 @@
  * Admin builder for quiz questions.
  */
 jQuery(function ($) {
-  const app = $('#wcrq-questions-app');
+  var app = $('#wcrq-questions-app');
   if (!app.length) {
     return;
   }
 
-  const list = app.find('.wcrq-question-list');
-  const fallback = $('.wcrq-questions-fallback');
-  const addButton = $('#wcrq_add_question');
-  const templateElement = $('#wcrq-question-template');
-  const templateHtml = templateElement.length ? templateElement.html().trim() : '';
-  const form = app.closest('form');
-  const hasI18n =
+  var list = app.find('.wcrq-question-list');
+  var fallback = $('.wcrq-questions-fallback');
+  var addButton = $('#wcrq_add_question');
+  var templateElement = $('#wcrq-question-template');
+  var templateHtml = templateElement.length ? templateElement.html().trim() : '';
+  var form = app.closest('form');
+  var hasI18n =
     typeof window !== 'undefined' &&
     window.wp &&
     window.wp.i18n &&
@@ -31,7 +31,7 @@ jQuery(function ($) {
     fallback.hide();
   }
 
-  let mediaFrame = null;
+  var mediaFrame = null;
 
   function escapeHtml(value) {
     return $('<div>').text(value || '').html();
@@ -42,12 +42,12 @@ jQuery(function ($) {
       question: '',
       answers: ['', '', '', ''],
       correct: 0,
-      image: '',
+      image: ''
     };
   }
 
   function ensureAnswers(values) {
-    const answers = Array.isArray(values) ? values.slice(0, 4) : [];
+    var answers = Array.isArray(values) ? values.slice(0, 4) : [];
     while (answers.length < 4) {
       answers.push('');
     }
@@ -55,8 +55,8 @@ jQuery(function ($) {
   }
 
   function updateRemoveState() {
-    const items = list.children('.wcrq-question-item');
-    const disableRemove = items.length <= 1;
+    var items = list.children('.wcrq-question-item');
+    var disableRemove = items.length <= 1;
     items.each(function () {
       $(this)
         .find('.wcrq-remove')
@@ -66,12 +66,12 @@ jQuery(function ($) {
 
   function refreshIndices() {
     list.children('.wcrq-question-item').each(function (index) {
-      const item = $(this);
+      var item = $(this);
       item.attr('data-index', index);
       item.find('.wcrq-question-number').text(index + 1);
       item.find('[data-name-template]').each(function () {
-        const field = $(this);
-        const templateName = field.data('nameTemplate');
+        var field = $(this);
+        var templateName = field.data('nameTemplate');
         if (templateName) {
           field.attr('name', templateName.replace(/__index__/g, index));
         }
@@ -81,20 +81,20 @@ jQuery(function ($) {
   }
 
   function setQuestionValues(item, data) {
-    const question = data || getBlankQuestion();
-    const answers = ensureAnswers(question.answers);
+    var question = data || getBlankQuestion();
+    var answers = ensureAnswers(question.answers);
 
     item.find('.wcrq-q').val(question.question || '');
     item.find('.wcrq-img').val(question.image || '');
 
-    const preview = item.find('.wcrq-image-preview');
+    var preview = item.find('.wcrq-image-preview');
     preview.empty();
     if (question.image) {
       preview.append(
         $('<img>', {
           src: question.image,
-          alt: '',
-        }),
+          alt: ''
+        })
       );
     }
 
@@ -102,18 +102,18 @@ jQuery(function ($) {
       $(this).val(answers[idx] || '');
     });
 
-    const correct =
+    var correct =
       typeof question.correct === 'number'
         ? question.correct
         : parseInt(question.correct, 10) || 0;
     item.find('.wcrq-correct').each(function () {
-      const radio = $(this);
+      var radio = $(this);
       radio.prop('checked', parseInt(radio.val(), 10) === correct);
     });
   }
 
   function createQuestion(data) {
-    const element = $(templateHtml);
+    var element = $(templateHtml);
     element.removeClass('wcrq-question-item-template');
     setQuestionValues(element, data);
     list.append(element);
@@ -122,15 +122,15 @@ jQuery(function ($) {
   }
 
   function getQuestionData(wrapper) {
-    const answers = [];
+    var answers = [];
     wrapper.find('.wcrq-a').each(function () {
       answers.push($(this).val());
     });
     return {
       question: wrapper.find('.wcrq-q').val(),
       image: wrapper.find('.wcrq-img').val(),
-      answers,
-      correct: parseInt(wrapper.find('.wcrq-correct:checked').val(), 10) || 0,
+      answers: answers,
+      correct: parseInt(wrapper.find('.wcrq-correct:checked').val(), 10) || 0
     };
   }
 
@@ -140,9 +140,9 @@ jQuery(function ($) {
   }
 
   function renderPreview(wrapper) {
-    const data = getQuestionData(wrapper);
-    const preview = wrapper.find('.wcrq-preview-area');
-    let html = '';
+    var data = getQuestionData(wrapper);
+    var preview = wrapper.find('.wcrq-preview-area');
+    var html = '';
 
     if (data.question) {
       html += '<p><strong>' + escapeHtml(data.question) + '</strong></p>';
@@ -159,7 +159,7 @@ jQuery(function ($) {
       if (!answer) {
         return;
       }
-      const mark = data.correct === index ? ' <em>(' + __('prawidłowa') + ')</em>' : '';
+      var mark = data.correct === index ? ' <em>(' + __('prawidłowa') + ')</em>' : '';
       html +=
         '<p><label><input type="radio" disabled> ' +
         escapeHtml(answer) +
@@ -173,14 +173,14 @@ jQuery(function ($) {
 
   addButton.on('click', function (event) {
     event.preventDefault();
-    const element = createQuestion(getBlankQuestion());
+    var element = createQuestion(getBlankQuestion());
     element.find('.wcrq-q').trigger('focus');
   });
 
   list.on('click', '.wcrq-remove', function (event) {
     event.preventDefault();
-    const wrapper = $(this).closest('.wcrq-question-item');
-    const items = list.children('.wcrq-question-item');
+    var wrapper = $(this).closest('.wcrq-question-item');
+    var items = list.children('.wcrq-question-item');
     if (items.length <= 1) {
       clearQuestion(wrapper);
       return;
@@ -199,16 +199,16 @@ jQuery(function ($) {
   });
 
   list.on('change', '.wcrq-img', function () {
-    const wrapper = $(this).closest('.wcrq-question-item');
-    const url = $(this).val();
-    const preview = wrapper.find('.wcrq-image-preview');
+    var wrapper = $(this).closest('.wcrq-question-item');
+    var url = $(this).val();
+    var preview = wrapper.find('.wcrq-image-preview');
     preview.empty();
     if (url) {
       preview.append(
         $('<img>', {
           src: url,
-          alt: '',
-        }),
+          alt: ''
+        })
       );
     }
     wrapper.find('.wcrq-preview-area').hide();
@@ -216,7 +216,7 @@ jQuery(function ($) {
 
   list.on('click', '.wcrq-remove-image', function (event) {
     event.preventDefault();
-    const wrapper = $(this).closest('.wcrq-question-item');
+    var wrapper = $(this).closest('.wcrq-question-item');
     wrapper.find('.wcrq-img').val('');
     wrapper.find('.wcrq-image-preview').empty();
     wrapper.find('.wcrq-preview-area').hide();
@@ -224,7 +224,7 @@ jQuery(function ($) {
 
   list.on('click', '.wcrq-select-image', function (event) {
     event.preventDefault();
-    const wrapper = $(this).closest('.wcrq-question-item');
+    var wrapper = $(this).closest('.wcrq-question-item');
 
     if (mediaFrame) {
       mediaFrame.close();
@@ -233,18 +233,18 @@ jQuery(function ($) {
     mediaFrame = wp.media({
       title: __('Wybierz grafikę'),
       button: { text: __('Użyj') },
-      multiple: false,
+      multiple: false
     });
 
     mediaFrame.on('select', function () {
-      const attachment = mediaFrame.state().get('selection').first().toJSON();
+      var attachment = mediaFrame.state().get('selection').first().toJSON();
       wrapper.find('.wcrq-img').val(attachment.url);
-      const preview = wrapper.find('.wcrq-image-preview');
+      var preview = wrapper.find('.wcrq-image-preview');
       preview.empty().append(
         $('<img>', {
           src: attachment.url,
-          alt: '',
-        }),
+          alt: ''
+        })
       );
       wrapper.find('.wcrq-preview-area').hide();
     });
