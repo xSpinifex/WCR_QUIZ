@@ -99,8 +99,12 @@ function wcrq_register_settings() {
     add_settings_section('wcrq_main', __('Ustawienia quizu', 'wcrq'), '__return_false', 'wcrq');
 
     add_settings_field('start_time', __('Czas rozpoczęcia', 'wcrq'), 'wcrq_field_start_time', 'wcrq', 'wcrq_main');
-    add_settings_field('duration', __('Czas trwania (minuty)', 'wcrq'), 'wcrq_field_duration', 'wcrq', 'wcrq_main');
-    add_settings_field('questions', __('Pytania', 'wcrq'), 'wcrq_field_questions', 'wcrq', 'wcrq_main');
+    add_settings_field('end_time', __('Czas zakończenia', 'wcrq'), 'wcrq_field_end_time', 'wcrq', 'wcrq_main');
+    add_settings_field('pre_start_text', __('Tekst przed rozpoczęciem', 'wcrq'), 'wcrq_field_pre_start_text', 'wcrq', 'wcrq_main');
+    add_settings_field('pre_quiz_text', __('Tekst przed kliknięciem START', 'wcrq'), 'wcrq_field_pre_quiz_text', 'wcrq', 'wcrq_main');
+    add_settings_field('post_quiz_text', __('Tekst po zakończeniu', 'wcrq'), 'wcrq_field_post_quiz_text', 'wcrq', 'wcrq_main');
+    add_settings_field('randomize_questions', __('Losowa kolejność pytań', 'wcrq'), 'wcrq_field_randomize_questions', 'wcrq', 'wcrq_main');
+    add_settings_field('allow_navigation', __('Zezwól na cofanie pytań', 'wcrq'), 'wcrq_field_allow_navigation', 'wcrq', 'wcrq_main');
     add_settings_field('show_results', __('Pokaż wynik użytkownikowi', 'wcrq'), 'wcrq_field_show_results', 'wcrq', 'wcrq_main');
 }
 add_action('admin_init', 'wcrq_register_settings');
@@ -108,6 +112,7 @@ add_action('admin_init', 'wcrq_register_settings');
 function wcrq_admin_menu() {
     add_menu_page('WCR Quiz', 'WCR Quiz', 'manage_options', 'wcrq', 'wcrq_settings_page_html', 'dashicons-welcome-learn-more', 20);
     add_submenu_page('wcrq', __('Ustawienia quizu', 'wcrq'), __('Ustawienia quizu', 'wcrq'), 'manage_options', 'wcrq', 'wcrq_settings_page_html');
+    add_submenu_page('wcrq', __('Pytania quizu', 'wcrq'), __('Pytania', 'wcrq'), 'manage_options', 'wcrq_questions', 'wcrq_questions_page_html');
     add_submenu_page('wcrq', __('Rejestracje', 'wcrq'), __('Rejestracje', 'wcrq'), 'manage_options', 'wcrq_registrations', 'wcrq_registrations_page_html');
     add_submenu_page('wcrq', __('Wyniki', 'wcrq'), __('Wyniki', 'wcrq'), 'manage_options', 'wcrq_results', 'wcrq_results_page_html');
 }
@@ -126,6 +131,25 @@ function wcrq_settings_page_html() {
             do_settings_sections('wcrq');
             submit_button();
             ?>
+        </form>
+    </div>
+    <?php
+}
+
+function wcrq_questions_page_html() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+    ?>
+    <div class="wrap">
+        <h1><?php esc_html_e('Pytania quizu', 'wcrq'); ?></h1>
+        <p class="description"><?php esc_html_e('Każde pytanie będzie wyświetlane w osobnej zakładce.', 'wcrq'); ?></p>
+        <form action="options.php" method="post">
+            <?php
+            settings_fields('wcrq_settings');
+            wcrq_field_questions();
+            ?>
+            <?php submit_button(); ?>
         </form>
     </div>
     <?php
@@ -238,10 +262,40 @@ function wcrq_field_start_time() {
     echo '<input type="datetime-local" name="wcrq_settings[start_time]" value="' . $value . '" />';
 }
 
-function wcrq_field_duration() {
+function wcrq_field_end_time() {
     $options = get_option('wcrq_settings');
-    $value = isset($options['duration']) ? intval($options['duration']) : 30;
-    echo '<input type="number" name="wcrq_settings[duration]" value="' . $value . '" min="1" />';
+    $value = isset($options['end_time']) ? esc_attr($options['end_time']) : '';
+    echo '<input type="datetime-local" name="wcrq_settings[end_time]" value="' . $value . '" />';
+}
+
+function wcrq_field_pre_start_text() {
+    $options = get_option('wcrq_settings');
+    $value = isset($options['pre_start_text']) ? $options['pre_start_text'] : '';
+    echo '<textarea name="wcrq_settings[pre_start_text]" rows="5" cols="60">' . esc_textarea($value) . '</textarea>';
+}
+
+function wcrq_field_pre_quiz_text() {
+    $options = get_option('wcrq_settings');
+    $value = isset($options['pre_quiz_text']) ? $options['pre_quiz_text'] : '';
+    echo '<textarea name="wcrq_settings[pre_quiz_text]" rows="5" cols="60">' . esc_textarea($value) . '</textarea>';
+}
+
+function wcrq_field_post_quiz_text() {
+    $options = get_option('wcrq_settings');
+    $value = isset($options['post_quiz_text']) ? $options['post_quiz_text'] : '';
+    echo '<textarea name="wcrq_settings[post_quiz_text]" rows="5" cols="60">' . esc_textarea($value) . '</textarea>';
+}
+
+function wcrq_field_randomize_questions() {
+    $options = get_option('wcrq_settings');
+    $checked = !empty($options['randomize_questions']);
+    echo '<label><input type="checkbox" name="wcrq_settings[randomize_questions]" value="1"' . checked(1, $checked, false) . ' /> ' . esc_html__('Włącz losową kolejność pytań.', 'wcrq') . '</label>';
+}
+
+function wcrq_field_allow_navigation() {
+    $options = get_option('wcrq_settings');
+    $checked = !empty($options['allow_navigation']);
+    echo '<label><input type="checkbox" name="wcrq_settings[allow_navigation]" value="1"' . checked(1, $checked, false) . ' /> ' . esc_html__('Pozwól uczestnikom wracać do poprzednich pytań.', 'wcrq') . '</label>';
 }
 
 function wcrq_field_questions() {
@@ -258,7 +312,7 @@ function wcrq_field_show_results() {
 }
 
 function wcrq_admin_scripts($hook) {
-    if (isset($_GET['page']) && $_GET['page'] === 'wcrq') {
+    if ($hook === 'wcrq_page_wcrq_questions') {
         // Media is required for adding images to questions
         wp_enqueue_media();
         wp_enqueue_script(
@@ -371,24 +425,27 @@ add_shortcode('wcr_registration', 'wcrq_registration_shortcode');
 // Quiz shortcode
 function wcrq_quiz_shortcode() {
     $options = get_option('wcrq_settings');
-    $start_time = isset($options['start_time']) ? strtotime($options['start_time']) : 0;
-    $duration = isset($options['duration']) ? intval($options['duration']) : 30;
-    $end_time = $start_time + $duration * 60;
+    $start_time = !empty($options['start_time']) ? strtotime($options['start_time']) : 0;
+    $end_time = !empty($options['end_time']) ? strtotime($options['end_time']) : 0;
     $now = current_time('timestamp');
 
-    if ($now < $start_time) {
-        $remaining = $start_time - $now;
-        return '<p>' . sprintf(__('Quiz rozpocznie się za %s minut.', 'wcrq'), ceil($remaining/60)) . '</p>';
+    if ($start_time && $now < $start_time) {
+        $text = !empty($options['pre_start_text']) ? wpautop(wp_kses_post($options['pre_start_text'])) : '<p>' . esc_html__('Quiz jeszcze się nie rozpoczął.', 'wcrq') . '</p>';
+        return '<div class="wcrq-pre-quiz">' . $text . '</div>';
     }
-    if ($now > $end_time) {
-        return '<p>' . __('Czas na quiz się skończył.', 'wcrq') . '</p>';
+
+    if ($end_time && $now > $end_time) {
+        $text = !empty($options['post_quiz_text']) ? wpautop(wp_kses_post($options['post_quiz_text'])) : '<p>' . esc_html__('Czas na quiz się skończył.', 'wcrq') . '</p>';
+        return '<div class="wcrq-pre-quiz">' . $text . '</div>';
     }
-    $remaining = $end_time - $now;
+
+    $remaining = $end_time ? max(0, $end_time - $now) : 0;
 
     // Check login
     if (empty($_SESSION['wcrq_participant'])) {
         return wcrq_login_form();
     }
+
     global $wpdb;
     $ptable = $wpdb->prefix . 'wcrq_participants';
     $blocked = $wpdb->get_var($wpdb->prepare("SELECT blocked FROM $ptable WHERE id = %d", $_SESSION['wcrq_participant']));
@@ -396,12 +453,19 @@ function wcrq_quiz_shortcode() {
         return '<p>' . __('Twoje konto zostało zablokowane.', 'wcrq') . '</p>';
     }
 
+    $allow_navigation = !empty($options['allow_navigation']);
+
     // Check if quiz started
     if (empty($_SESSION['wcrq_started'])) {
         if (!empty($_POST['wcrq_start'])) {
-            $_SESSION['wcrq_started'] = time();
+            $_SESSION['wcrq_started'] = current_time('timestamp');
         } else {
-            return '<form method="post"><p><button type="submit" name="wcrq_start" value="1">' . __('Rozpocznij quiz', 'wcrq') . '</button></p></form>';
+            $pre_quiz = !empty($options['pre_quiz_text']) ? wpautop(wp_kses_post($options['pre_quiz_text'])) : '';
+            $warning = '';
+            if (!$allow_navigation) {
+                $warning = '<p class="wcrq-navigation-warning">' . esc_html__('Cofanie pytań jest niedozwolone', 'wcrq') . '</p>';
+            }
+            return '<div class="wcrq-pre-quiz">' . $pre_quiz . $warning . '<form method="post" class="wcrq-start"><p><button type="submit" name="wcrq_start" value="1">' . __('Rozpocznij quiz', 'wcrq') . '</button></p></form></div>';
         }
     }
 
@@ -411,40 +475,74 @@ function wcrq_quiz_shortcode() {
     }
 
     // Display quiz
-    $questions = json_decode($options['questions'], true);
-    if (!$questions) {
-        return '<p>' . __('Brak skonfigurowanych pytań.', 'wcrq') . '</p>';
-    }
-    shuffle($questions);
-    foreach ($questions as &$q) {
-        if (isset($q['answers']) && is_array($q['answers'])) {
-            $answers = $q['answers'];
-            $keys = array_keys($answers);
-            shuffle($keys);
-            $shuffled = [];
-            foreach ($keys as $k) {
-                $shuffled[] = $answers[$k];
-            }
-            $q['answers'] = $shuffled;
+    if (!empty($_SESSION['wcrq_questions'])) {
+        $questions = $_SESSION['wcrq_questions'];
+    } else {
+        $questions = json_decode($options['questions'] ?? '[]', true);
+        if (!$questions || !is_array($questions)) {
+            return '<p>' . __('Brak skonfigurowanych pytań.', 'wcrq') . '</p>';
         }
-    }
-    $_SESSION['wcrq_questions'] = $questions;
 
-    wp_enqueue_script('wcrq-quiz', plugins_url('assets/js/quiz.js', __FILE__), [], '0.1', true);
-    $out = '<form method="post" class="wcrq-quiz" data-duration="' . intval($remaining) . '">' . wp_nonce_field('wcrq_quiz', 'wcrq_quiz_nonce', true, false);
+        if (!empty($options['randomize_questions'])) {
+            shuffle($questions);
+        }
+
+        foreach ($questions as &$q) {
+            if (isset($q['answers']) && is_array($q['answers'])) {
+                $answers = [];
+                foreach ($q['answers'] as $idx => $answer) {
+                    $answers[] = [
+                        'text' => $answer,
+                        'original_index' => $idx,
+                    ];
+                }
+                shuffle($answers);
+                $q['answers'] = array_map(function ($item) {
+                    return $item['text'];
+                }, $answers);
+                foreach ($answers as $new_index => $answer_data) {
+                    if (intval($q['correct']) === intval($answer_data['original_index'])) {
+                        $q['correct'] = $new_index;
+                        break;
+                    }
+                }
+            }
+        }
+        unset($q);
+
+        $_SESSION['wcrq_questions'] = $questions;
+    }
+
+    wp_enqueue_script('wcrq-quiz', plugins_url('assets/js/quiz.js', __FILE__), [], '0.2', true);
+    $out = '<form method="post" class="wcrq-quiz wcrq-no-js" data-duration="' . intval($remaining) . '" data-allow-navigation="' . ($allow_navigation ? '1' : '0') . '">';
+    $out .= wp_nonce_field('wcrq_quiz', 'wcrq_quiz_nonce', true, false);
+
+    $out .= '<div class="wcrq-question-tabs" role="tablist">';
     foreach ($questions as $idx => $q) {
-        $out .= '<div class="wcrq-question">';
-        $out .= '<p>' . esc_html($q['question']) . '</p>';
+        $out .= '<button type="button" class="wcrq-question-tab" data-index="' . intval($idx) . '" role="tab">' . sprintf(__('Pytanie %d', 'wcrq'), $idx + 1) . '</button>';
+    }
+    $out .= '</div>';
+
+    foreach ($questions as $idx => $q) {
+        $out .= '<div class="wcrq-question" data-index="' . intval($idx) . '" role="tabpanel">';
+        $out .= '<p class="wcrq-question-title">' . esc_html($q['question']) . '</p>';
         if (!empty($q['image'])) {
             $out .= '<p><img src="' . esc_url($q['image']) . '" alt="" class="wcrq-question-image" /></p>';
         }
         foreach ($q['answers'] as $a_idx => $answer) {
             $name = 'q' . $idx;
-            $out .= '<label><input type="radio" name="' . esc_attr($name) . '" value="' . $a_idx . '"> ' . esc_html($answer) . '</label><br />';
+            $out .= '<label class="wcrq-answer"><input type="radio" name="' . esc_attr($name) . '" value="' . intval($a_idx) . '"> ' . esc_html($answer) . '</label>';
         }
         $out .= '</div>';
     }
-    $out .= '<p><button type="submit">' . __('Zakończ', 'wcrq') . '</button></p></form>';
+
+    $out .= '<div class="wcrq-question-nav">';
+    $out .= '<button type="button" class="wcrq-prev">' . esc_html__('Poprzednie pytanie', 'wcrq') . '</button>';
+    $out .= '<button type="button" class="wcrq-next">' . esc_html__('Następne pytanie', 'wcrq') . '</button>';
+    $out .= '<button type="submit" class="wcrq-submit">' . esc_html__('Zakończ', 'wcrq') . '</button>';
+    $out .= '</div>';
+
+    $out .= '</form>';
     return $out;
 }
 add_shortcode('wcr_quiz', 'wcrq_quiz_shortcode');
@@ -490,9 +588,10 @@ function wcrq_handle_quiz_submit() {
         return '<p>' . __('Sesja wygasła.', 'wcrq') . '</p>';
     }
     $options = get_option('wcrq_settings');
-    $end = isset($options['start_time']) ? strtotime($options['start_time']) + intval($options['duration']) * 60 : time();
-    if (current_time('timestamp') > $end) {
-        return '<p>' . __('Czas na quiz się skończył.', 'wcrq') . '</p>';
+    $end = !empty($options['end_time']) ? strtotime($options['end_time']) : 0;
+    if ($end && current_time('timestamp') > $end) {
+        $text = !empty($options['post_quiz_text']) ? wpautop(wp_kses_post($options['post_quiz_text'])) : '<p>' . esc_html__('Czas na quiz się skończył.', 'wcrq') . '</p>';
+        return $text;
     }
 
     $questions = $_SESSION['wcrq_questions'];
@@ -521,9 +620,16 @@ function wcrq_handle_quiz_submit() {
     unset($_SESSION['wcrq_started']);
 
     $options = get_option('wcrq_settings');
+    $message = '';
     if (!empty($options['show_results'])) {
-        return '<p>' . sprintf(__('Twój wynik: %s%%', 'wcrq'), $score) . '</p>';
+        $message .= '<p>' . sprintf(__('Twój wynik: %s%%', 'wcrq'), $score) . '</p>';
     }
-    return '<p>' . __('Twoje odpowiedzi zostały zapisane.', 'wcrq') . '</p>';
+    if (!empty($options['post_quiz_text'])) {
+        $message .= wpautop(wp_kses_post($options['post_quiz_text']));
+    }
+    if (!$message) {
+        $message = '<p>' . __('Twoje odpowiedzi zostały zapisane.', 'wcrq') . '</p>';
+    }
+    return $message;
 }
 
