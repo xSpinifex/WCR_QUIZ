@@ -9,6 +9,61 @@
         }
     }
 
+    function forEachNode(list, callback) {
+        if (!list) {
+            return;
+        }
+        for (var i = 0; i < list.length; i++) {
+            callback(list[i], i);
+        }
+    }
+
+    function elementMatches(element, selector) {
+        if (!element || element.nodeType !== 1) {
+            return false;
+        }
+        var matches =
+            element.matches ||
+            element.msMatchesSelector ||
+            element.webkitMatchesSelector ||
+            element.mozMatchesSelector ||
+            element.oMatchesSelector;
+        if (!matches) {
+            return false;
+        }
+        return matches.call(element, selector);
+    }
+
+    function closest(element, selector) {
+        if (!element) {
+            return null;
+        }
+        if (typeof element.closest === 'function') {
+            return element.closest(selector);
+        }
+        var current = element;
+        while (current && current.nodeType === 1) {
+            if (elementMatches(current, selector)) {
+                return current;
+            }
+            current = current.parentElement || current.parentNode;
+        }
+        return null;
+    }
+
+    function removeElement(element) {
+        if (!element) {
+            return;
+        }
+        if (typeof element.remove === 'function') {
+            element.remove();
+            return;
+        }
+        if (element.parentNode) {
+            element.parentNode.removeChild(element);
+        }
+    }
+
     ready(function () {
         var form = document.getElementById('wcrq-questions-form');
         if (!form) {
@@ -53,15 +108,18 @@
         }
 
         function refreshPreviews() {
-            list.querySelectorAll('input[name^="wcrq_settings"][name$="[image]"]').forEach(function (input) {
-                updatePreview(input);
-            });
+            forEachNode(
+                list.querySelectorAll('input[name^="wcrq_settings"][name$="[image]"]'),
+                function (input) {
+                    updatePreview(input);
+                }
+            );
         }
 
         function toggleRemoveState() {
             var items = list.querySelectorAll('.wcrq-question-item');
             var disable = items.length <= 1;
-            items.forEach(function (item) {
+            forEachNode(items, function (item) {
                 var button = item.querySelector('.wcrq-remove-question');
                 if (button) {
                     button.disabled = disable;
@@ -71,14 +129,14 @@
 
         function updateOrder() {
             var items = list.querySelectorAll('.wcrq-question-item');
-            items.forEach(function (item, index) {
+            forEachNode(items, function (item, index) {
                 item.dataset.index = String(index);
                 var number = item.querySelector('.wcrq-question-number');
                 if (number) {
                     number.textContent = String(index + 1);
                 }
 
-                item.querySelectorAll('[name]').forEach(function (field) {
+                forEachNode(item.querySelectorAll('[name]'), function (field) {
                     var name = field.getAttribute('name');
                     if (!name || !questionNamePattern.test(name)) {
                         return;
@@ -89,14 +147,14 @@
                     );
                 });
 
-                item.querySelectorAll('[id]').forEach(function (field) {
+                forEachNode(item.querySelectorAll('[id]'), function (field) {
                     if (!field.id) {
                         return;
                     }
                     field.id = field.id.replace(questionIdPattern, 'wcrq_questions_' + index);
                 });
 
-                item.querySelectorAll('label[for]').forEach(function (label) {
+                forEachNode(item.querySelectorAll('label[for]'), function (label) {
                     var forId = label.getAttribute('for');
                     if (!forId) {
                         return;
@@ -133,7 +191,7 @@
             if (strings.removeConfirmation && !window.confirm(strings.removeConfirmation)) {
                 return;
             }
-            item.remove();
+            removeElement(item);
             updateOrder();
             refreshPreviews();
         }
@@ -174,30 +232,30 @@
         }
 
         list.addEventListener('click', function (event) {
-            var removeButton = event.target.closest('.wcrq-remove-question');
+            var removeButton = closest(event.target, '.wcrq-remove-question');
             if (removeButton) {
                 event.preventDefault();
-                var item = removeButton.closest('.wcrq-question-item');
+                var item = closest(removeButton, '.wcrq-question-item');
                 if (item) {
                     removeQuestion(item);
                 }
                 return;
             }
 
-            var selectButton = event.target.closest('.wcrq-select-image');
+            var selectButton = closest(event.target, '.wcrq-select-image');
             if (selectButton) {
                 event.preventDefault();
-                var itemForImage = selectButton.closest('.wcrq-question-item');
+                var itemForImage = closest(selectButton, '.wcrq-question-item');
                 if (itemForImage) {
                     openMediaLibrary(itemForImage);
                 }
                 return;
             }
 
-            var clearButton = event.target.closest('.wcrq-clear-image');
+            var clearButton = closest(event.target, '.wcrq-clear-image');
             if (clearButton) {
                 event.preventDefault();
-                var itemForClear = clearButton.closest('.wcrq-question-item');
+                var itemForClear = closest(clearButton, '.wcrq-question-item');
                 if (!itemForClear) {
                     return;
                 }
@@ -211,7 +269,7 @@
 
         list.addEventListener('input', function (event) {
             var target = event.target;
-            if (target && target.matches('input[name^="wcrq_settings"][name$="[image]"]')) {
+            if (target && elementMatches(target, 'input[name^="wcrq_settings"][name$="[image]"]')) {
                 updatePreview(target);
             }
         });
