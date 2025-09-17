@@ -158,6 +158,28 @@ function wcrq_sanitize_settings($input) {
     $output['allow_navigation'] = !empty($input['allow_navigation']) ? 1 : 0;
     $output['show_results'] = !empty($input['show_results']) ? 1 : 0;
 
+    if (isset($input['questions'])) {
+        $questions = $input['questions'];
+
+        if (is_string($questions)) {
+            $decoded = json_decode($questions, true);
+            $questions = is_array($decoded) ? $decoded : [];
+        }
+
+        if (is_array($questions)) {
+            $sanitized_questions = [];
+
+            foreach ($questions as $question) {
+                $prepared = wcrq_prepare_question_data($question, false);
+                if ($prepared) {
+                    $sanitized_questions[] = $prepared;
+                }
+            }
+
+            $output['questions'] = $sanitized_questions;
+        }
+    }
+
     return $output;
 }
 
