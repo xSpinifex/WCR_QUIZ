@@ -974,6 +974,47 @@ function wcrq_registrations_page_html() {
     echo '</div>';
 }
 
+function wcrq_handle_results_actions() {
+    if (!is_admin() || empty($_GET['page']) || $_GET['page'] !== 'wcrq_results') {
+        return;
+    }
+
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    global $wpdb;
+    $results_table = $wpdb->prefix . 'wcrq_results';
+
+    if (!empty($_GET['wcrq_result_action']) && !empty($_GET['result_id'])) {
+        $result_id = intval($_GET['result_id']);
+        $nonce = isset($_GET['_wpnonce']) ? $_GET['_wpnonce'] : '';
+        $notice_key = 'invalid_nonce';
+
+        if (wp_verify_nonce($nonce, 'wcrq_delete_result_' . $result_id)) {
+            $deleted = $wpdb->delete($results_table, ['id' => $result_id]);
+            $notice_key = $deleted ? 'deleted' : 'delete_failed';
+        }
+
+        $redirect_url = add_query_arg(
+            [
+                'page' => 'wcrq_results',
+                'wcrq_notice' => $notice_key,
+            ],
+            admin_url('admin.php')
+        );
+
+        if (!headers_sent()) {
+            wp_safe_redirect($redirect_url);
+            exit;
+        }
+
+        $_GET['wcrq_notice'] = $notice_key;
+        unset($_GET['wcrq_result_action'], $_GET['result_id'], $_GET['_wpnonce']);
+    }
+}
+add_action('admin_init', 'wcrq_handle_results_actions');
+
 function wcrq_results_page_html() {
     if (!current_user_can('manage_options')) {
         return;
@@ -1003,46 +1044,18 @@ function wcrq_results_page_html() {
         }
 
         if ($is_confirmed) {
-            $wpdb->query("TRUNCATE TABLE $results_table");
-            $notices[] = ['type' => 'success', 'text' => __('Wszystkie wyniki zostały usunięte.', 'wcrq')];
+            $deleted = $wpdb->query("DELETE FROM $results_table");
+            if ($deleted !== false) {
+                $wpdb->query("ALTER TABLE $results_table AUTO_INCREMENT = 1");
+                $notices[] = ['type' => 'success', 'text' => __('Wszystkie wyniki zostały usunięte.', 'wcrq')];
+            } else {
+                $notices[] = ['type' => 'error', 'text' => __('Nie udało się usunąć wyników.', 'wcrq')];
+            }
         } else {
             $notices[] = ['type' => 'error', 'text' => __('Niepoprawne potwierdzenie. Wyniki nie zostały usunięte.', 'wcrq')];
         }
     } elseif (!empty($_POST['wcrq_clear_results_nonce'])) {
         $notices[] = ['type' => 'error', 'text' => __('Nieprawidłowy token operacji.', 'wcrq')];
-    }
-
-    $redirect_notice = '';
-    if (!empty($_GET['wcrq_result_action']) && !empty($_GET['result_id'])) {
-        $result_id = intval($_GET['result_id']);
-        $nonce = isset($_GET['_wpnonce']) ? $_GET['_wpnonce'] : '';
-        if (wp_verify_nonce($nonce, 'wcrq_delete_result_' . $result_id)) {
-            $deleted = $wpdb->delete($results_table, ['id' => $result_id]);
-            if ($deleted) {
-                $redirect_notice = 'deleted';
-            } else {
-                $redirect_notice = 'delete_failed';
-            }
-        } else {
-            $redirect_notice = 'invalid_nonce';
-        }
-    }
-
-    if ($redirect_notice !== '') {
-        $redirect_url = add_query_arg(
-            [
-                'page' => 'wcrq_results',
-                'wcrq_notice' => $redirect_notice,
-            ],
-            admin_url('admin.php')
-        );
-
-        if (wp_safe_redirect($redirect_url)) {
-            exit;
-        }
-
-        $_GET['wcrq_notice'] = $redirect_notice;
-        unset($_GET['wcrq_result_action'], $_GET['result_id'], $_GET['_wpnonce']);
     }
 
     $rows = wcrq_get_results_rows();
