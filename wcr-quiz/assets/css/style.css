@@ -32,7 +32,8 @@
 .wcrq-registration button,
 .wcrq-login button,
 .wcrq-quiz button,
-.wcrq-start button {
+.wcrq-start button,
+.wcrq-completion-login-button {
     background: #16a34a;
     color: #fff;
     padding: 1rem 2rem;
@@ -45,8 +46,18 @@
 .wcrq-registration button:hover,
 .wcrq-login button:hover,
 .wcrq-quiz button:hover,
-.wcrq-start button:hover {
+.wcrq-start button:hover,
+.wcrq-completion-login-button:hover {
     background: #15803d;
+}
+
+.wcrq-relogin-block {
+    margin-top: 2rem;
+    text-align: center;
+}
+
+.wcrq-relogin-block .wcrq-login {
+    margin-top: 1.5rem;
 }
 
 .wcrq-login-message {

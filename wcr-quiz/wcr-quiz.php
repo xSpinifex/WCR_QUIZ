@@ -968,17 +968,108 @@ function wcrq_results_page_html() {
     if (!current_user_can('manage_options')) {
         return;
     }
+
+    global $wpdb;
+    $results_table = $wpdb->prefix . 'wcrq_results';
+    $notices = [];
+
+    if (!empty($_POST['wcrq_clear_results_nonce']) && wp_verify_nonce($_POST['wcrq_clear_results_nonce'], 'wcrq_clear_results')) {
+        $raw_confirmation = isset($_POST['wcrq_clear_results_confirm']) ? wp_unslash($_POST['wcrq_clear_results_confirm']) : '';
+        if (!is_string($raw_confirmation)) {
+            $raw_confirmation = '';
+        }
+        $confirmation = trim($raw_confirmation);
+        $user = wp_get_current_user();
+        $is_confirmed = false;
+
+        if ($confirmation !== '') {
+            if ($confirmation === '1+2=3') {
+                $is_confirmed = true;
+            } elseif ($user && $user->exists() && wp_check_password($raw_confirmation, $user->user_pass, $user->ID)) {
+                $is_confirmed = true;
+            }
+        }
+
+        if ($is_confirmed) {
+            $wpdb->query("TRUNCATE TABLE $results_table");
+            $notices[] = ['type' => 'success', 'text' => __('Wszystkie wyniki zostały usunięte.', 'wcrq')];
+        } else {
+            $notices[] = ['type' => 'error', 'text' => __('Niepoprawne potwierdzenie. Wyniki nie zostały usunięte.', 'wcrq')];
+        }
+    } elseif (!empty($_POST['wcrq_clear_results_nonce'])) {
+        $notices[] = ['type' => 'error', 'text' => __('Nieprawidłowy token operacji.', 'wcrq')];
+    }
+
+    $redirect_notice = '';
+    if (!empty($_GET['wcrq_result_action']) && !empty($_GET['result_id'])) {
+        $result_id = intval($_GET['result_id']);
+        $nonce = isset($_GET['_wpnonce']) ? $_GET['_wpnonce'] : '';
+        if (wp_verify_nonce($nonce, 'wcrq_delete_result_' . $result_id)) {
+            $deleted = $wpdb->delete($results_table, ['id' => $result_id]);
+            if ($deleted) {
+                $redirect_notice = 'deleted';
+            } else {
+                $redirect_notice = 'delete_failed';
+            }
+        } else {
+            $redirect_notice = 'invalid_nonce';
+        }
+    }
+
+    if ($redirect_notice !== '') {
+        $redirect_url = add_query_arg(
+            [
+                'page' => 'wcrq_results',
+                'wcrq_notice' => $redirect_notice,
+            ],
+            admin_url('admin.php')
+        );
+        wp_safe_redirect($redirect_url);
+        exit;
+    }
+
     $rows = wcrq_get_results_rows();
 
     if (!empty($_GET['wcrq_export']) && '1' === $_GET['wcrq_export']) {
         if (!empty($_GET['_wpnonce']) && wp_verify_nonce($_GET['_wpnonce'], 'wcrq_export_results')) {
             wcrq_export_results_csv($rows);
         } else {
-            echo '<div class="notice notice-error"><p>' . esc_html__('Nieprawidłowy token eksportu.', 'wcrq') . '</p></div>';
+            $notices[] = ['type' => 'error', 'text' => __('Nieprawidłowy token eksportu.', 'wcrq')];
         }
     }
 
     echo '<div class="wrap"><h1>' . esc_html(__('Wyniki', 'wcrq')) . '</h1>';
+
+    if (!empty($_GET['wcrq_notice'])) {
+        $notice_key = sanitize_key(wp_unslash($_GET['wcrq_notice']));
+        switch ($notice_key) {
+            case 'deleted':
+                $notices[] = ['type' => 'success', 'text' => __('Wybrany wynik został usunięty.', 'wcrq')];
+                break;
+            case 'delete_failed':
+                $notices[] = ['type' => 'error', 'text' => __('Nie udało się usunąć wyniku.', 'wcrq')];
+                break;
+            case 'invalid_nonce':
+                $notices[] = ['type' => 'error', 'text' => __('Nieprawidłowy token usuwania wyniku.', 'wcrq')];
+                break;
+        }
+    }
+
+    foreach ($notices as $notice) {
+        $class = $notice['type'] === 'success' ? 'notice notice-success' : 'notice notice-error';
+        echo '<div class="' . esc_attr($class) . '"><p>' . esc_html($notice['text']) . '</p></div>';
+    }
+
+    $confirm_all = esc_js(__('Czy na pewno usunąć wszystkie wyniki?', 'wcrq'));
+    echo '<form method="post" class="wcrq-results-clear" onsubmit="return confirm(\'' . $confirm_all . '\');">';
+    wp_nonce_field('wcrq_clear_results', 'wcrq_clear_results_nonce');
+    echo '<p>';
+    echo '<label for="wcrq_clear_results_confirm">' . esc_html__('Aby usunąć wszystkie wyniki, wpisz swoje hasło (lub 1+2=3):', 'wcrq') . '</label> ';
+    echo '<input type="password" id="wcrq_clear_results_confirm" name="wcrq_clear_results_confirm" class="regular-text" /> ';
+    submit_button(__('Wyczyść wszystkie wyniki', 'wcrq'), 'delete', 'submit', false);
+    echo '</p>';
+    echo '</form>';
+
     if ($rows) {
         $export_url = wp_nonce_url(add_query_arg('wcrq_export', '1'), 'wcrq_export_results');
         echo '<p><a href="' . esc_url($export_url) . '" class="button button-primary">' . esc_html__('Eksportuj do CSV', 'wcrq') . '</a></p>';
@@ -991,6 +1082,7 @@ function wcrq_results_page_html() {
             . '<th>' . esc_html__('Czas', 'wcrq') . '</th>'
             . '<th>' . esc_html__('Naruszenia', 'wcrq') . '</th>'
             . '<th>' . esc_html__('Szczegóły', 'wcrq') . '</th>'
+            . '<th>' . esc_html__('Akcje', 'wcrq') . '</th>'
             . '</tr></thead><tbody>';
         foreach ($rows as $r) {
             $duration_seconds = intval($r->duration_seconds);
@@ -1044,7 +1136,20 @@ function wcrq_results_page_html() {
             } else {
                 echo esc_html__('Brak danych.', 'wcrq');
             }
-            echo '</td></tr>';
+            $delete_url = wp_nonce_url(
+                add_query_arg(
+                    [
+                        'page' => 'wcrq_results',
+                        'wcrq_result_action' => 'delete',
+                        'result_id' => intval($r->id),
+                    ],
+                    admin_url('admin.php')
+                ),
+                'wcrq_delete_result_' . intval($r->id)
+            );
+            echo '</td>';
+            echo '<td><a class="button button-secondary" href="' . esc_url($delete_url) . '" onclick="return confirm(\'' . esc_js(__('Czy na pewno usunąć ten wynik?', 'wcrq')) . '\');">' . esc_html__('Usuń wynik', 'wcrq') . '</a></td>';
+            echo '</tr>';
         }
         echo '</tbody></table>';
     } else {
@@ -1514,6 +1619,13 @@ function wcrq_build_completion_message($score) {
         $message = '<p>' . __('Twoje odpowiedzi zostały zapisane.', 'wcrq') . '</p>';
     }
 
+    wp_enqueue_script('wcrq-completion', plugins_url('assets/js/completion.js', __FILE__), [], '0.1', true);
+
+    $message .= '<div class="wcrq-relogin-block">';
+    $message .= '<p><button type="button" class="wcrq-completion-login-button">' . esc_html__('Zaloguj', 'wcrq') . '</button></p>';
+    $message .= '<div class="wcrq-relogin-container" hidden>' . wcrq_login_form() . '</div>';
+    $message .= '</div>';
+
     return $message;
 }
 
@@ -1700,6 +1812,7 @@ function wcrq_export_results_csv($rows) {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename=' . $filename);
     $output = fopen('php://output', 'w');
+    fprintf($output, chr(0xEF) . chr(0xBB) . chr(0xBF));
     fputcsv($output, [
         __('Imię i nazwisko', 'wcrq'),
         __('Email', 'wcrq'),
@@ -1712,7 +1825,7 @@ function wcrq_export_results_csv($rows) {
         __('Start', 'wcrq'),
         __('Koniec', 'wcrq'),
         __('Szczegóły odpowiedzi', 'wcrq'),
-    ]);
+    ], ';');
 
     foreach ($rows as $row) {
         $duration_seconds = intval($row->duration_seconds);
@@ -1739,7 +1852,7 @@ function wcrq_export_results_csv($rows) {
             $row->start_time,
             $row->end_time,
             implode(' | ', $detail_strings),
-        ]);
+        ], ';');
     }
 
     fclose($output);
