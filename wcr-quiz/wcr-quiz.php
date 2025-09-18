@@ -251,7 +251,11 @@ function wcrq_admin_menu() {
     add_submenu_page('wcrq', __('Ustawienia quizu', 'wcrq'), __('Ustawienia quizu', 'wcrq'), 'manage_options', 'wcrq', 'wcrq_settings_page_html');
     add_submenu_page('wcrq', __('Pytania', 'wcrq'), __('Pytania', 'wcrq'), 'manage_options', 'wcrq_questions', 'wcrq_questions_page_html');
     add_submenu_page('wcrq', __('Rejestracje', 'wcrq'), __('Rejestracje', 'wcrq'), 'manage_options', 'wcrq_registrations', 'wcrq_registrations_page_html');
-    add_submenu_page('wcrq', __('Wyniki', 'wcrq'), __('Wyniki', 'wcrq'), 'manage_options', 'wcrq_results', 'wcrq_results_page_html');
+    $results_hook = add_submenu_page('wcrq', __('Wyniki', 'wcrq'), __('Wyniki', 'wcrq'), 'manage_options', 'wcrq_results', 'wcrq_results_page_html');
+
+    if ($results_hook) {
+        add_action('load-' . $results_hook, 'wcrq_handle_results_export_request');
+    }
 }
 add_action('admin_menu', 'wcrq_admin_menu');
 
@@ -1071,6 +1075,39 @@ function wcrq_handle_results_actions() {
 }
 add_action('admin_init', 'wcrq_handle_results_actions');
 
+function wcrq_handle_results_export_request() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    if (empty($_GET['wcrq_export']) || $_GET['wcrq_export'] !== 'xlsx') {
+        return;
+    }
+
+    $nonce = isset($_GET['_wpnonce']) ? $_GET['_wpnonce'] : '';
+    if (empty($nonce) || !wp_verify_nonce($nonce, 'wcrq_export_results')) {
+        $redirect_url = add_query_arg(
+            [
+                'page' => 'wcrq_results',
+                'wcrq_notice' => 'invalid_export_nonce',
+            ],
+            admin_url('admin.php')
+        );
+
+        if (!headers_sent()) {
+            wp_safe_redirect($redirect_url);
+            exit;
+        }
+
+        $_GET['wcrq_notice'] = 'invalid_export_nonce';
+        unset($_GET['wcrq_export'], $_GET['_wpnonce']);
+        return;
+    }
+
+    $rows = wcrq_get_results_rows();
+    wcrq_export_results_excel($rows);
+}
+
 function wcrq_results_page_html() {
     if (!current_user_can('manage_options')) {
         return;
@@ -1116,14 +1153,6 @@ function wcrq_results_page_html() {
 
     $rows = wcrq_get_results_rows();
 
-    if (!empty($_GET['wcrq_export']) && 'xlsx' === $_GET['wcrq_export']) {
-        if (!empty($_GET['_wpnonce']) && wp_verify_nonce($_GET['_wpnonce'], 'wcrq_export_results')) {
-            wcrq_export_results_excel($rows);
-        } else {
-            $notices[] = ['type' => 'error', 'text' => __('Nieprawidłowy token eksportu.', 'wcrq')];
-        }
-    }
-
     echo '<div class="wrap"><h1>' . esc_html(__('Wyniki', 'wcrq')) . '</h1>';
 
     if (!empty($_GET['wcrq_notice'])) {
@@ -1137,6 +1166,9 @@ function wcrq_results_page_html() {
                 break;
             case 'invalid_nonce':
                 $notices[] = ['type' => 'error', 'text' => __('Nieprawidłowy token usuwania wyniku.', 'wcrq')];
+                break;
+            case 'invalid_export_nonce':
+                $notices[] = ['type' => 'error', 'text' => __('Nieprawidłowy token eksportu.', 'wcrq')];
                 break;
         }
     }
@@ -2097,6 +2129,12 @@ function wcrq_export_results_excel($rows) {
         wp_die(__('Biblioteka do eksportu wyników nie jest dostępna.', 'wcrq'));
     }
 
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    nocache_headers();
+
     $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
     $sheet = $spreadsheet->getActiveSheet();
     $sheet->setTitle(__('Wyniki', 'wcrq'));
@@ -2153,6 +2191,8 @@ function wcrq_export_results_excel($rows) {
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     header('Cache-Control: max-age=0');
+    header('Content-Transfer-Encoding: binary');
+    header('X-Robots-Tag: noindex, nofollow');
 
     $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
     $writer->save('php://output');
