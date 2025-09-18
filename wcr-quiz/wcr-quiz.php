@@ -1545,7 +1545,14 @@ function wcrq_quiz_shortcode() {
     $required_message = esc_attr__('Zaznacz odpowiedź, zanim przejdziesz do kolejnego pytania.', 'wcrq');
 
     foreach ($questions as $idx => $q) {
-        $out .= '<div class="wcrq-question" data-index="' . intval($idx) . '" role="tabpanel" data-required-message="' . $required_message . '">';
+        $locked_answer = isset($saved_responses[$idx]) ? intval($saved_responses[$idx]) : -1;
+        $is_locked = $locked_answer >= 0;
+        $question_classes = 'wcrq-question' . ($is_locked ? ' wcrq-question-locked' : '');
+        $data_attrs = ' data-index="' . intval($idx) . '" role="tabpanel" data-required-message="' . $required_message . '" data-locked="' . ($is_locked ? '1' : '0') . '"';
+        if ($is_locked) {
+            $data_attrs .= ' data-answer="' . intval($locked_answer) . '"';
+        }
+        $out .= '<div class="' . $question_classes . '"' . $data_attrs . '>';
         $out .= '<p class="wcrq-question-title">' . esc_html($q['question']) . '</p>';
         if (!empty($q['image'])) {
             $out .= '<p><img src="' . esc_url($q['image']) . '" alt="" class="wcrq-question-image" /></p>';
@@ -1553,7 +1560,8 @@ function wcrq_quiz_shortcode() {
         foreach ($q['answers'] as $a_idx => $answer) {
             $name = 'q' . $idx;
             $checked = (isset($saved_responses[$idx]) && intval($saved_responses[$idx]) === intval($a_idx)) ? ' checked' : '';
-            $out .= '<label class="wcrq-answer"><input type="radio" name="' . esc_attr($name) . '" value="' . intval($a_idx) . '"' . $checked . '> ' . esc_html($answer) . '</label>';
+            $disabled = $is_locked ? ' disabled' : '';
+            $out .= '<label class="wcrq-answer"><input type="radio" name="' . esc_attr($name) . '" value="' . intval($a_idx) . '"' . $checked . $disabled . '> ' . esc_html($answer) . '</label>';
         }
         $out .= '<p class="wcrq-question-error-message" aria-live="polite" hidden></p>';
         $out .= '</div>';
@@ -1656,12 +1664,12 @@ function wcrq_build_completion_message($score) {
         $message = '<p>' . __('Twoje odpowiedzi zostały zapisane.', 'wcrq') . '</p>';
     }
 
-    wp_enqueue_script('wcrq-completion', plugins_url('assets/js/completion.js', __FILE__), [], '0.1', true);
+    $redirect_url = function_exists('get_permalink') ? get_permalink() : '';
+    if (!$redirect_url) {
+        $redirect_url = home_url('/');
+    }
 
-    $message .= '<div class="wcrq-relogin-block">';
-    $message .= '<p><button type="button" class="wcrq-completion-login-button">' . esc_html__('Zaloguj', 'wcrq') . '</button></p>';
-    $message .= '<div class="wcrq-relogin-container" hidden>' . wcrq_login_form() . '</div>';
-    $message .= '</div>';
+    $message .= '<p class="wcrq-completion-actions"><a class="wcrq-completion-close-button" href="' . esc_url($redirect_url) . '">' . esc_html__('Zamknij', 'wcrq') . '</a></p>';
 
     return $message;
 }
@@ -1711,7 +1719,14 @@ function wcrq_handle_quiz_submit() {
     $responses = isset($stored_answers['responses']) && is_array($stored_answers['responses']) ? $stored_answers['responses'] : [];
     $correct = 0;
     foreach ($questions as $idx => $q) {
+        $existing = isset($responses[$idx]) ? intval($responses[$idx]) : -1;
         $given = isset($_POST['q' . $idx]) ? intval($_POST['q' . $idx]) : -1;
+        if ($existing >= 0) {
+            $given = $existing;
+        }
+        if ($given < 0 && isset($_SESSION['wcrq_saved_responses']) && is_array($_SESSION['wcrq_saved_responses']) && isset($_SESSION['wcrq_saved_responses'][$idx])) {
+            $given = intval($_SESSION['wcrq_saved_responses'][$idx]);
+        }
         $responses[$idx] = $given;
         if ($given === intval($q['correct'])) {
             $correct++;
@@ -1783,6 +1798,15 @@ function wcrq_ajax_save_answer() {
         wp_send_json_error(['message' => __('Nieprawidłowe pytanie.', 'wcrq')], 400);
     }
 
+    $current_answer = isset($answers['responses'][$question]) ? intval($answers['responses'][$question]) : -1;
+    if ($current_answer >= 0) {
+        if (!isset($_SESSION['wcrq_saved_responses']) || !is_array($_SESSION['wcrq_saved_responses'])) {
+            $_SESSION['wcrq_saved_responses'] = [];
+        }
+        $_SESSION['wcrq_saved_responses'][$question] = $current_answer;
+        wp_send_json_success(['locked' => true, 'answer' => $current_answer]);
+    }
+
     $answers['responses'][$question] = $answer;
 
     $now_timestamp = current_time('timestamp');
@@ -1801,7 +1825,7 @@ function wcrq_ajax_save_answer() {
     }
     $_SESSION['wcrq_saved_responses'][$question] = $answer;
 
-    wp_send_json_success();
+    wp_send_json_success(['locked' => true, 'answer' => $answer]);
 }
 add_action('wp_ajax_wcrq_save_answer', 'wcrq_ajax_save_answer');
 add_action('wp_ajax_nopriv_wcrq_save_answer', 'wcrq_ajax_save_answer');
