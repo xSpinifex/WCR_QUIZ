@@ -995,6 +995,8 @@ function wcrq_results_page_html() {
         if ($confirmation !== '') {
             if ($confirmation === '3' || $confirmation === '1+2=3') {
                 $is_confirmed = true;
+            } elseif ((int) preg_replace('/\D+/', '', $confirmation) === 3) {
+                $is_confirmed = true;
             } elseif ($user && $user->exists() && wp_check_password($raw_confirmation, $user->user_pass, $user->ID)) {
                 $is_confirmed = true;
             }
@@ -1034,8 +1036,13 @@ function wcrq_results_page_html() {
             ],
             admin_url('admin.php')
         );
-        wp_safe_redirect($redirect_url);
-        exit;
+
+        if (wp_safe_redirect($redirect_url)) {
+            exit;
+        }
+
+        $_GET['wcrq_notice'] = $redirect_notice;
+        unset($_GET['wcrq_result_action'], $_GET['result_id'], $_GET['_wpnonce']);
     }
 
     $rows = wcrq_get_results_rows();
