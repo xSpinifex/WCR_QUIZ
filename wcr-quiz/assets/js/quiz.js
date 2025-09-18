@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var endTimestamp = parseInt(dataset.endTimestamp || '0', 10);
   var serverNow = parseInt(dataset.serverNow || '0', 10);
   var allowNavigation = dataset.allowNavigation === '1';
+  var initialIndex = parseInt(dataset.currentQuestion || '0', 10);
   var hasEnd = !isNaN(endTimestamp) && endTimestamp > 0;
   var offsetMs = !isNaN(serverNow) && serverNow > 0 ? Date.now() - serverNow * 1000 : 0;
 
@@ -66,11 +67,18 @@ document.addEventListener('DOMContentLoaded', function() {
   var questions = Array.from(form.querySelectorAll('.wcrq-question'));
   if (!questions.length) return;
 
+  if (isNaN(initialIndex) || initialIndex < 0) {
+    initialIndex = 0;
+  }
+  if (initialIndex >= questions.length) {
+    initialIndex = questions.length - 1;
+  }
+
   var tabs = Array.from(form.querySelectorAll('.wcrq-question-tab'));
   var prevBtn = form.querySelector('.wcrq-prev');
   var nextBtn = form.querySelector('.wcrq-next');
   var submitBtn = form.querySelector('.wcrq-submit');
-  var current = 0;
+  var current = initialIndex;
   var quizData = window.wcrqQuizData || {};
   var resultId = parseInt(quizData.resultId || 0, 10);
   var shouldTrackViolations = !!quizData.trackViolations;
@@ -134,28 +142,14 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
-  function isQuestionLocked(question) {
-    return !!question && question.dataset && question.dataset.locked === '1';
-  }
-
-  function lockQuestion(question, answerValue) {
-    if (!question) {
-      return;
+  function saveProgress(index) {
+    if (!quizData.progressNonce || !resultId) {
+      return Promise.resolve();
     }
-    if (typeof answerValue !== 'undefined') {
-      question.dataset.answer = String(answerValue);
-    }
-    question.dataset.locked = '1';
-    question.classList.add('is-locked');
-    var inputs = question.querySelectorAll('input[type="radio"]');
-    inputs.forEach(function(input) {
-      if (typeof answerValue !== 'undefined') {
-        var inputValue = parseInt(input.value || '0', 10);
-        if (!isNaN(inputValue)) {
-          input.checked = inputValue === answerValue;
-        }
-      }
-      input.disabled = true;
+    return postFormData('wcrq_save_progress', {
+      nonce: quizData.progressNonce,
+      current: index,
+      resultId: resultId
     });
   }
 
@@ -293,11 +287,15 @@ document.addEventListener('DOMContentLoaded', function() {
   function setActive(index) {
     if (index < 0 || index >= questions.length) return;
     current = index;
+    form.dataset.currentQuestion = String(current);
     questions.forEach(function(q, i) {
       q.classList.toggle('is-active', i === index);
     });
     syncTabState(index);
     updateButtons();
+    saveProgress(current).catch(function() {
+      return null;
+    });
   }
 
   function ensureAnswered(index) {
@@ -326,39 +324,19 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   questions.forEach(function(question, index) {
-    if (isQuestionLocked(question)) {
-      var lockedValue = typeof question.dataset.answer !== 'undefined' ? parseInt(question.dataset.answer || '-1', 10) : -1;
-      if (!isNaN(lockedValue) && lockedValue >= 0) {
-        lockQuestion(question, lockedValue);
-      } else {
-        lockQuestion(question);
-      }
-    }
-    question.addEventListener('change', function(event) {
-      if (isQuestionLocked(question)) {
-        if (typeof question.dataset.answer !== 'undefined') {
-          var prevValue = parseInt(question.dataset.answer || '-1', 10);
-          if (!isNaN(prevValue) && prevValue >= 0 && event && event.target && event.target.value !== undefined) {
-            var targetValue = parseInt(event.target.value || '-1', 10);
-            if (!isNaN(targetValue) && targetValue !== prevValue) {
-              event.target.checked = targetValue === prevValue;
-            }
-          }
-        }
-        return;
-      }
+    question.addEventListener('change', function() {
       markAnswered(index);
       var checked = question.querySelector('input[type="radio"]:checked');
-      if (checked) {
-        var value = parseInt(checked.value || '0', 10);
-        if (!isNaN(value)) {
-          question.dataset.answer = String(value);
-          lockQuestion(question, value);
-          saveAnswer(index, value).catch(function() {
-            return null;
-          });
-        }
+      if (!checked) {
+        return;
       }
+      var value = parseInt(checked.value || '0', 10);
+      if (isNaN(value)) {
+        return;
+      }
+      saveAnswer(index, value).catch(function() {
+        return null;
+      });
     });
   });
 
@@ -411,5 +389,5 @@ document.addEventListener('DOMContentLoaded', function() {
     form.dataset.submitted = '1';
   });
 
-  setActive(0);
+  setActive(initialIndex);
 });
