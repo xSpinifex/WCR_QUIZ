@@ -87,6 +87,8 @@ document.addEventListener('DOMContentLoaded', function() {
   var violationCount = 0;
   var lastViolationAt = 0;
   var requiredMessage = quizData.needAnswerMessage || '';
+  var sessionNonce = quizData.sessionNonce || '';
+  var sessionCheckInterval = parseInt(quizData.sessionCheckInterval || '0', 10);
 
   function updateWarning(count) {
     violationCount = count;
@@ -127,6 +129,31 @@ document.addEventListener('DOMContentLoaded', function() {
         return Promise.reject();
       }
       return response;
+    });
+  }
+
+  function checkSession() {
+    if (!sessionNonce) {
+      return Promise.resolve();
+    }
+    return postFormData('wcrq_check_session', {
+      nonce: sessionNonce
+    }).then(function(response) {
+      if (!response) {
+        return null;
+      }
+      return response.json().catch(function() {
+        return null;
+      });
+    }).then(function(payload) {
+      if (!payload) {
+        return;
+      }
+      if (!payload.success) {
+        window.location.reload();
+      }
+    }).catch(function() {
+      return null;
     });
   }
 
@@ -343,6 +370,11 @@ document.addEventListener('DOMContentLoaded', function() {
   questions.forEach(function(_, index) {
     markAnswered(index);
   });
+
+  if (!isNaN(sessionCheckInterval) && sessionCheckInterval > 0 && sessionNonce) {
+    checkSession();
+    setInterval(checkSession, sessionCheckInterval * 1000);
+  }
 
   if (allowNavigation) {
     if (prevBtn) {

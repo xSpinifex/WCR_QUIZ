@@ -18,6 +18,18 @@ function wcrq_maybe_start_session() {
 }
 add_action('init', 'wcrq_maybe_start_session');
 
+function wcrq_current_timestamp() {
+    return current_time('timestamp', true);
+}
+
+function wcrq_get_polish_timezone() {
+    try {
+        return new DateTimeZone('Europe/Warsaw');
+    } catch (Exception $e) {
+        return wp_timezone();
+    }
+}
+
 function wcrq_reset_quiz_progress() {
     unset(
         $_SESSION['wcrq_questions'],
@@ -53,7 +65,7 @@ function wcrq_store_session_token($participant_id, $token) {
     $table = $wpdb->prefix . 'wcrq_participants';
     $wpdb->update($table, [
         'active_session_token' => $token,
-        'active_session_started' => current_time('mysql'),
+        'active_session_started' => wp_date('Y-m-d H:i:s', wcrq_current_timestamp(), wcrq_get_polish_timezone()),
     ], [
         'id' => intval($participant_id),
     ]);
@@ -252,14 +264,6 @@ function wcrq_admin_enqueue_assets($hook_suffix) {
     wp_enqueue_script('wcrq-admin-results', plugins_url('assets/js/results.js', __FILE__), [], '0.1', true);
 }
 add_action('admin_enqueue_scripts', 'wcrq_admin_enqueue_assets');
-
-function wcrq_get_polish_timezone() {
-    try {
-        return new DateTimeZone('Europe/Warsaw');
-    } catch (Exception $e) {
-        return wp_timezone();
-    }
-}
 
 function wcrq_parse_datetime_local($value) {
     if (empty($value)) {
@@ -632,15 +636,15 @@ function wcrq_finalize_result_row($row, $forced_end_timestamp = null) {
 
     $start_timestamp = wcrq_local_datetime_to_timestamp($row->start_time);
     if ($start_timestamp <= 0) {
-        $start_timestamp = current_time('timestamp');
+        $start_timestamp = wcrq_current_timestamp();
     }
 
-    $end_timestamp = $forced_end_timestamp !== null ? intval($forced_end_timestamp) : current_time('timestamp');
+    $end_timestamp = $forced_end_timestamp !== null ? intval($forced_end_timestamp) : wcrq_current_timestamp();
     if ($end_timestamp < $start_timestamp) {
         $end_timestamp = $start_timestamp;
     }
 
-    $end_mysql = wp_date('Y-m-d H:i:s', $end_timestamp);
+    $end_mysql = wp_date('Y-m-d H:i:s', $end_timestamp, wcrq_get_polish_timezone());
     $duration = max(0, $end_timestamp - $start_timestamp);
 
     global $wpdb;
@@ -664,7 +668,7 @@ function wcrq_finalize_expired_results() {
         return;
     }
 
-    $now = current_time('timestamp');
+    $now = wcrq_current_timestamp();
     if ($now <= $end_time) {
         return;
     }
@@ -738,8 +742,8 @@ function wcrq_ensure_result_record($questions) {
         return intval($existing->id);
     }
 
-    $start_timestamp = isset($_SESSION['wcrq_started']) ? intval($_SESSION['wcrq_started']) : current_time('timestamp');
-    $start_mysql = wp_date('Y-m-d H:i:s', $start_timestamp);
+    $start_timestamp = isset($_SESSION['wcrq_started']) ? intval($_SESSION['wcrq_started']) : wcrq_current_timestamp();
+    $start_mysql = wp_date('Y-m-d H:i:s', $start_timestamp, wcrq_get_polish_timezone());
 
     $initial_answers = [
         'questions' => wcrq_prepare_questions_snapshot($questions),
@@ -1404,7 +1408,7 @@ function wcrq_quiz_shortcode() {
     $options = get_option('wcrq_settings');
     $start_time = !empty($options['start_time']) ? wcrq_parse_datetime_local($options['start_time']) : 0;
     $end_time = !empty($options['end_time']) ? wcrq_parse_datetime_local($options['end_time']) : 0;
-    $now = current_time('timestamp');
+    $now = wcrq_current_timestamp();
 
     if ($start_time && $now < $start_time) {
         wp_enqueue_script('wcrq-countdown', plugins_url('assets/js/countdown.js', __FILE__), [], '0.1', true);
@@ -1466,7 +1470,7 @@ function wcrq_quiz_shortcode() {
     // Check if quiz started
     if (empty($_SESSION['wcrq_started'])) {
         if (!empty($_POST['wcrq_start'])) {
-            $_SESSION['wcrq_started'] = current_time('timestamp');
+            $_SESSION['wcrq_started'] = wcrq_current_timestamp();
         } else {
             $pre_quiz = !empty($options['pre_quiz_text']) ? wpautop(wp_kses_post($options['pre_quiz_text'])) : '';
             $sections = '';
@@ -1569,7 +1573,7 @@ function wcrq_quiz_shortcode() {
 
     $result_id = wcrq_ensure_result_record($questions);
 
-    $start_timestamp = isset($_SESSION['wcrq_started']) ? intval($_SESSION['wcrq_started']) : current_time('timestamp');
+    $start_timestamp = isset($_SESSION['wcrq_started']) ? intval($_SESSION['wcrq_started']) : wcrq_current_timestamp();
     $start_display = wcrq_format_polish_datetime($start_timestamp);
     if ($start_display === '') {
         $start_display = __('Brak danych', 'wcrq');
@@ -1582,11 +1586,13 @@ function wcrq_quiz_shortcode() {
         'saveNonce' => wp_create_nonce('wcrq_save_answer'),
         'progressNonce' => wp_create_nonce('wcrq_save_progress'),
         'violationNonce' => wp_create_nonce('wcrq_log_violation'),
+        'sessionNonce' => wp_create_nonce('wcrq_check_session'),
         'resultId' => $result_id,
         'violationMessage' => esc_html__('Opuszczanie strony jest zabronione. Każde naruszenie zostaje zapisane w wynikach.', 'wcrq'),
         'showViolationMessage' => $show_violations_to_users ? 1 : 0,
         'trackViolations' => 1,
         'needAnswerMessage' => esc_html__('Zaznacz odpowiedź, zanim przejdziesz do kolejnego pytania.', 'wcrq'),
+        'sessionCheckInterval' => 15,
     ]);
 
     $out = '<form method="post" class="wcrq-quiz wcrq-no-js" data-duration="' . intval($remaining) . '" data-allow-navigation="' . ($allow_navigation ? '1' : '0') . '" data-start-timestamp="' . intval($start_timestamp) . '" data-end-timestamp="' . intval($end_timestamp) . '" data-server-now="' . intval($now) . '" data-current-question="' . intval($current_question) . '">';
@@ -1745,8 +1751,8 @@ function wcrq_handle_quiz_submit() {
         return '<p>' . __('Sesja wygasła.', 'wcrq') . '</p>';
     }
     $options = get_option('wcrq_settings');
-    $end = !empty($options['end_time']) ? strtotime($options['end_time']) : 0;
-    if ($end && current_time('timestamp') > $end) {
+    $end = !empty($options['end_time']) ? wcrq_parse_datetime_local($options['end_time']) : 0;
+    if ($end && wcrq_current_timestamp() > $end) {
         $text = !empty($options['post_quiz_text']) ? wpautop(wp_kses_post($options['post_quiz_text'])) : '<p>' . esc_html__('Czas na quiz się skończył.', 'wcrq') . '</p>';
         return $text;
     }
@@ -1799,8 +1805,8 @@ function wcrq_handle_quiz_submit() {
     $question_count = count($questions);
     $score = $question_count ? round($correct / $question_count * 100, 2) : 0;
 
-    $now_timestamp = current_time('timestamp');
-    $end_mysql = wp_date('Y-m-d H:i:s', $now_timestamp);
+    $now_timestamp = wcrq_current_timestamp();
+    $end_mysql = wp_date('Y-m-d H:i:s', $now_timestamp, wcrq_get_polish_timezone());
     $start_timestamp = isset($_SESSION['wcrq_started']) ? intval($_SESSION['wcrq_started']) : wcrq_local_datetime_to_timestamp($row->start_time);
     $duration = max(0, $now_timestamp - intval($start_timestamp));
 
@@ -1818,6 +1824,28 @@ function wcrq_handle_quiz_submit() {
 
     return wcrq_build_completion_message($score);
 }
+
+function wcrq_ajax_check_session() {
+    check_ajax_referer('wcrq_check_session', 'nonce');
+
+    $participant = wcrq_require_active_participant();
+    if (is_wp_error($participant)) {
+        $code = $participant->get_error_code() === 'session_conflict' ? 409 : 403;
+        wp_send_json_error(['message' => $participant->get_error_message()], $code);
+    }
+
+    $payload = [
+        'active' => true,
+    ];
+
+    if (!empty($_SESSION['wcrq_result_id'])) {
+        $payload['resultId'] = intval($_SESSION['wcrq_result_id']);
+    }
+
+    wp_send_json_success($payload);
+}
+add_action('wp_ajax_wcrq_check_session', 'wcrq_ajax_check_session');
+add_action('wp_ajax_nopriv_wcrq_check_session', 'wcrq_ajax_check_session');
 
 function wcrq_ajax_save_answer() {
     check_ajax_referer('wcrq_save_answer', 'nonce');
@@ -1875,12 +1903,12 @@ function wcrq_ajax_save_answer() {
         $answers['current'] = isset($_SESSION['wcrq_current_question']) ? intval($_SESSION['wcrq_current_question']) : $question;
     }
 
-    $now_timestamp = current_time('timestamp');
+    $now_timestamp = wcrq_current_timestamp();
     $duration = max(0, $now_timestamp - wcrq_local_datetime_to_timestamp($row->start_time));
 
     $wpdb->update($table, [
         'answers' => maybe_serialize($answers),
-        'end_time' => wp_date('Y-m-d H:i:s', $now_timestamp),
+        'end_time' => wp_date('Y-m-d H:i:s', $now_timestamp, wcrq_get_polish_timezone()),
         'duration_seconds' => $duration,
     ], [
         'id' => $result_id,
@@ -1949,12 +1977,12 @@ function wcrq_ajax_save_progress() {
 
     $answers['current'] = $current;
 
-    $now_timestamp = current_time('timestamp');
+    $now_timestamp = wcrq_current_timestamp();
     $duration = max(0, $now_timestamp - wcrq_local_datetime_to_timestamp($row->start_time));
 
     $wpdb->update($table, [
         'answers' => maybe_serialize($answers),
-        'end_time' => wp_date('Y-m-d H:i:s', $now_timestamp),
+        'end_time' => wp_date('Y-m-d H:i:s', $now_timestamp, wcrq_get_polish_timezone()),
         'duration_seconds' => $duration,
     ], [
         'id' => $result_id,
