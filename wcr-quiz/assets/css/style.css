@@ -80,18 +80,26 @@
 }
 
 .wcrq-question-tab {
+    align-items: center;
     background: #dcfce7;
-    border: 1px solid #16a34a;
-    border-radius: 4px;
+    border: 2px solid #16a34a;
+    border-radius: 50%;
     color: #166534;
     cursor: pointer;
-    padding: 0.5rem 1rem;
-    transition: background 0.2s ease;
+    display: inline-flex;
+    font-weight: 600;
+    height: 3rem;
+    justify-content: center;
+    padding: 0;
+    position: relative;
+    transition: background 0.2s ease, transform 0.2s ease;
+    width: 3rem;
 }
 
 .wcrq-question-tab.is-active {
     background: #16a34a;
     color: #fff;
+    transform: scale(1.05);
 }
 
 .wcrq-question-tab.is-answered:not(.is-active) {
@@ -101,6 +109,18 @@
 .wcrq-question-tab[disabled] {
     cursor: not-allowed;
     opacity: 0.6;
+}
+
+.wcrq-question-tab .screen-reader-text {
+    clip: rect(1px, 1px, 1px, 1px);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    width: 1px;
+}
+
+.wcrq-question-tab span[aria-hidden="true"] {
+    font-size: 1.1rem;
 }
 
 .wcrq-quiz:not(.wcrq-no-js) .wcrq-question {
@@ -129,6 +149,17 @@
 
 .wcrq-question-nav button {
     flex: 1 1 auto;
+}
+
+.wcrq-quiz-warning {
+    background: #fee2e2;
+    border: 2px solid #dc2626;
+    border-radius: 6px;
+    color: #b91c1c;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    padding: 0.75rem 1rem;
+    text-align: center;
 }
 
 .wcrq-pre-quiz {
@@ -164,4 +195,38 @@
     font-size: 0.95rem;
     color: #555;
     text-align: center;
+}
+
+.wcrq-result-details {
+    margin: 0.75rem 0 0 1.25rem;
+}
+
+.wcrq-result-details li {
+    margin-bottom: 1rem;
+}
+
+.wcrq-answer-status {
+    border-radius: 999px;
+    display: inline-block;
+    font-size: 0.9rem;
+    margin-top: 0.35rem;
+    padding: 0.2rem 0.75rem;
+}
+
+.wcrq-answer-status--correct {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.wcrq-answer-status--incorrect {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.wcrq-result-image {
+    max-width: 180px;
+    height: auto;
+    margin: 0.5rem 0;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
 }

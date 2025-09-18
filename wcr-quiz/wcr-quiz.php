@@ -49,9 +49,12 @@ function wcrq_activate() {
     $sql2 = "CREATE TABLE $results_table (
         id bigint(20) NOT NULL AUTO_INCREMENT,
         participant_id mediumint(9) NOT NULL,
-        score float NOT NULL,
+        score float NOT NULL DEFAULT 0,
         start_time datetime NOT NULL,
         end_time datetime NOT NULL,
+        duration_seconds int NOT NULL DEFAULT 0,
+        violations int NOT NULL DEFAULT 0,
+        is_completed tinyint(1) NOT NULL DEFAULT 0,
         answers longtext,
         PRIMARY KEY  (id)
     ) $charset;";
@@ -79,6 +82,33 @@ function wcrq_maybe_update_participants_table() {
     }
 }
 add_action('plugins_loaded', 'wcrq_maybe_update_participants_table');
+
+function wcrq_maybe_update_results_table() {
+    global $wpdb;
+    $table = $wpdb->prefix . 'wcrq_results';
+    $table_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $table));
+    if ($table_exists !== $table) {
+        return;
+    }
+
+    $columns = $wpdb->get_results("SHOW COLUMNS FROM $table", ARRAY_A);
+    $column_names = wp_list_pluck($columns, 'Field');
+
+    if (!in_array('duration_seconds', $column_names, true)) {
+        $wpdb->query("ALTER TABLE $table ADD duration_seconds int NOT NULL DEFAULT 0 AFTER end_time");
+    }
+    if (!in_array('violations', $column_names, true)) {
+        $wpdb->query("ALTER TABLE $table ADD violations int NOT NULL DEFAULT 0 AFTER duration_seconds");
+    }
+    if (!in_array('is_completed', $column_names, true)) {
+        $wpdb->query("ALTER TABLE $table ADD is_completed tinyint(1) NOT NULL DEFAULT 0 AFTER violations");
+    }
+    $score_column = $wpdb->get_row($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'score'), ARRAY_A);
+    if ($score_column && (empty($score_column['Default']) || $score_column['Default'] === null)) {
+        $wpdb->query("ALTER TABLE $table MODIFY score float NOT NULL DEFAULT 0");
+    }
+}
+add_action('plugins_loaded', 'wcrq_maybe_update_results_table');
 
 function wcrq_maybe_create_tables() {
     global $wpdb;
@@ -143,6 +173,21 @@ function wcrq_parse_datetime_local($value) {
     }
 
     $timestamp = strtotime($value);
+    return $timestamp ? $timestamp : 0;
+}
+
+function wcrq_local_datetime_to_timestamp($datetime) {
+    if (empty($datetime)) {
+        return 0;
+    }
+
+    $tz = wcrq_get_polish_timezone();
+    $dt = DateTime::createFromFormat('Y-m-d H:i:s', $datetime, $tz);
+    if ($dt instanceof DateTime) {
+        return $dt->getTimestamp();
+    }
+
+    $timestamp = strtotime($datetime);
     return $timestamp ? $timestamp : 0;
 }
 
@@ -235,6 +280,66 @@ function wcrq_prepare_question_data($question, $unslash = true) {
     ];
 }
 
+function wcrq_format_duration($seconds) {
+    $seconds = max(0, intval($seconds));
+    $hours = floor($seconds / HOUR_IN_SECONDS);
+    $minutes = floor(($seconds % HOUR_IN_SECONDS) / MINUTE_IN_SECONDS);
+    $remaining = $seconds % MINUTE_IN_SECONDS;
+
+    return sprintf('%02d:%02d:%02d', $hours, $minutes, $remaining);
+}
+
+function wcrq_extract_result_details($answers_value) {
+    $details = [];
+    $data = maybe_unserialize($answers_value);
+
+    $questions = [];
+    $responses = [];
+
+    if (is_array($data)) {
+        if (isset($data['questions']) && is_array($data['questions'])) {
+            $questions = $data['questions'];
+        }
+        if (isset($data['responses']) && is_array($data['responses'])) {
+            $responses = $data['responses'];
+        } elseif (!$questions) {
+            $responses = $data;
+        }
+    }
+
+    if ($questions) {
+        foreach ($questions as $index => $question) {
+            $answers = isset($question['answers']) && is_array($question['answers']) ? $question['answers'] : [];
+            $selected = isset($responses[$index]) ? intval($responses[$index]) : -1;
+            $correct = isset($question['correct']) ? intval($question['correct']) : -1;
+
+            $details[] = [
+                'label' => sprintf(__('Pytanie %d', 'wcrq'), $index + 1),
+                'question' => $question['question'] ?? '',
+                'answers' => $answers,
+                'selected' => $selected,
+                'correct' => $correct,
+                'is_correct' => $selected >= 0 && $selected === $correct,
+                'image' => !empty($question['image']) ? esc_url_raw($question['image']) : '',
+            ];
+        }
+    } elseif ($responses) {
+        foreach ($responses as $index => $selected) {
+            $details[] = [
+                'label' => sprintf(__('Pytanie %d', 'wcrq'), $index + 1),
+                'question' => '',
+                'answers' => [],
+                'selected' => intval($selected),
+                'correct' => null,
+                'is_correct' => null,
+                'image' => '',
+            ];
+        }
+    }
+
+    return $details;
+}
+
 function wcrq_get_saved_questions() {
     $options = get_option('wcrq_settings', []);
     $stored = $options['questions'] ?? [];
@@ -257,6 +362,72 @@ function wcrq_get_saved_questions() {
     }
 
     return $questions;
+}
+
+function wcrq_prepare_questions_snapshot($questions) {
+    $snapshot = [];
+    foreach ($questions as $index => $question) {
+        $snapshot[$index] = [
+            'question' => $question['question'] ?? '',
+            'answers' => isset($question['answers']) && is_array($question['answers']) ? array_values($question['answers']) : [],
+            'correct' => isset($question['correct']) ? intval($question['correct']) : 0,
+        ];
+        if (!empty($question['image'])) {
+            $snapshot[$index]['image'] = esc_url_raw($question['image']);
+        }
+    }
+
+    return $snapshot;
+}
+
+function wcrq_ensure_result_record($questions) {
+    if (empty($_SESSION['wcrq_participant'])) {
+        return 0;
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'wcrq_results';
+    $participant_id = intval($_SESSION['wcrq_participant']);
+    $result_id = isset($_SESSION['wcrq_result_id']) ? intval($_SESSION['wcrq_result_id']) : 0;
+
+    if ($result_id > 0) {
+        $row = $wpdb->get_row($wpdb->prepare("SELECT id, answers FROM $table WHERE id = %d AND participant_id = %d", $result_id, $participant_id));
+        if ($row) {
+            $answers = maybe_unserialize($row->answers);
+            if (!is_array($answers)) {
+                $answers = [];
+            }
+            if (empty($answers['questions'])) {
+                $answers['questions'] = wcrq_prepare_questions_snapshot($questions);
+                $wpdb->update($table, ['answers' => maybe_serialize($answers)], ['id' => $result_id]);
+            }
+            return $result_id;
+        }
+    }
+
+    $start_timestamp = isset($_SESSION['wcrq_started']) ? intval($_SESSION['wcrq_started']) : current_time('timestamp');
+    $start_mysql = wp_date('Y-m-d H:i:s', $start_timestamp);
+
+    $initial_answers = [
+        'questions' => wcrq_prepare_questions_snapshot($questions),
+        'responses' => [],
+    ];
+
+    $wpdb->insert($table, [
+        'participant_id' => $participant_id,
+        'score' => 0,
+        'start_time' => $start_mysql,
+        'end_time' => $start_mysql,
+        'duration_seconds' => 0,
+        'violations' => 0,
+        'is_completed' => 0,
+        'answers' => maybe_serialize($initial_answers),
+    ]);
+
+    $result_id = intval($wpdb->insert_id);
+    $_SESSION['wcrq_result_id'] = $result_id;
+
+    return $result_id;
 }
 
 function wcrq_questions_page_html() {
@@ -525,19 +696,87 @@ function wcrq_results_page_html() {
     if (!current_user_can('manage_options')) {
         return;
     }
-    global $wpdb;
-    $pt = $wpdb->prefix . 'wcrq_participants';
-    $rt = $wpdb->prefix . 'wcrq_results';
-    $rows = $wpdb->get_results("SELECT p.name, p.email, r.score, r.start_time, r.end_time FROM $rt r JOIN $pt p ON r.participant_id = p.id ORDER BY r.end_time DESC");
+    $rows = wcrq_get_results_rows();
+
+    if (!empty($_GET['wcrq_export']) && '1' === $_GET['wcrq_export']) {
+        if (!empty($_GET['_wpnonce']) && wp_verify_nonce($_GET['_wpnonce'], 'wcrq_export_results')) {
+            wcrq_export_results_csv($rows);
+        } else {
+            echo '<div class="notice notice-error"><p>' . esc_html__('Nieprawidłowy token eksportu.', 'wcrq') . '</p></div>';
+        }
+    }
+
     echo '<div class="wrap"><h1>' . esc_html(__('Wyniki', 'wcrq')) . '</h1>';
     if ($rows) {
-        echo '<table class="widefat"><thead><tr><th>' . __('Imię', 'wcrq') . '</th><th>Email</th><th>' . __('Wynik', 'wcrq') . '</th><th>' . __('Start', 'wcrq') . '</th><th>' . __('Koniec', 'wcrq') . '</th></tr></thead><tbody>';
+        $export_url = wp_nonce_url(add_query_arg('wcrq_export', '1'), 'wcrq_export_results');
+        echo '<p><a href="' . esc_url($export_url) . '" class="button button-primary">' . esc_html__('Eksportuj do CSV', 'wcrq') . '</a></p>';
+        echo '<table class="widefat fixed striped"><thead><tr>'
+            . '<th>' . esc_html__('Uczeń', 'wcrq') . '</th>'
+            . '<th>' . esc_html__('Email', 'wcrq') . '</th>'
+            . '<th>' . esc_html__('Szkoła', 'wcrq') . '</th>'
+            . '<th>' . esc_html__('Klasa', 'wcrq') . '</th>'
+            . '<th>' . esc_html__('Wynik', 'wcrq') . '</th>'
+            . '<th>' . esc_html__('Czas', 'wcrq') . '</th>'
+            . '<th>' . esc_html__('Naruszenia', 'wcrq') . '</th>'
+            . '<th>' . esc_html__('Szczegóły', 'wcrq') . '</th>'
+            . '</tr></thead><tbody>';
         foreach ($rows as $r) {
-            echo '<tr><td>' . esc_html($r->name) . '</td><td>' . esc_html($r->email) . '</td><td>' . esc_html($r->score) . '%</td><td>' . esc_html($r->start_time) . '</td><td>' . esc_html($r->end_time) . '</td></tr>';
+            $duration_seconds = intval($r->duration_seconds);
+            if ($duration_seconds <= 0) {
+                $duration_seconds = max(0, wcrq_local_datetime_to_timestamp($r->end_time) - wcrq_local_datetime_to_timestamp($r->start_time));
+            }
+            $duration = wcrq_format_duration($duration_seconds);
+            $details = wcrq_extract_result_details($r->answers);
+            $start_display = mysql2date(get_option('date_format') . ' ' . get_option('time_format'), $r->start_time, true);
+            $end_display = mysql2date(get_option('date_format') . ' ' . get_option('time_format'), $r->end_time, true);
+            echo '<tr>'
+                . '<td>' . esc_html($r->name) . '</td>'
+                . '<td>' . esc_html($r->email) . '</td>'
+                . '<td>' . esc_html($r->school) . '</td>'
+                . '<td>' . esc_html($r->class) . '</td>'
+                . '<td>' . esc_html(number_format_i18n($r->score, 2)) . '%</td>'
+                . '<td>' . esc_html($duration) . '</td>'
+                . '<td>' . esc_html(intval($r->violations)) . '</td>'
+                . '<td>';
+            if ($details) {
+                echo '<details><summary>' . esc_html__('Pokaż odpowiedzi', 'wcrq') . '</summary>';
+                echo '<p><strong>' . esc_html__('Czas startu:', 'wcrq') . '</strong> ' . esc_html($start_display) . '<br />';
+                echo '<strong>' . esc_html__('Czas zakończenia:', 'wcrq') . '</strong> ' . esc_html($end_display) . '<br />';
+                echo '<strong>' . esc_html__('Quiz ukończony:', 'wcrq') . '</strong> ' . esc_html($r->is_completed ? __('Tak', 'wcrq') : __('Nie', 'wcrq')) . '</p>';
+                echo '<ol class="wcrq-result-details">';
+                foreach ($details as $detail) {
+                    $selected_text = ($detail['selected'] >= 0 && isset($detail['answers'][$detail['selected']])) ? $detail['answers'][$detail['selected']] : __('Brak odpowiedzi', 'wcrq');
+                    $correct_text = ($detail['correct'] !== null && $detail['correct'] >= 0 && isset($detail['answers'][$detail['correct']])) ? $detail['answers'][$detail['correct']] : __('Brak danych', 'wcrq');
+                    $status = '';
+                    if ($detail['is_correct'] === true) {
+                        $status = '<span class="wcrq-answer-status wcrq-answer-status--correct">' . esc_html__('Poprawna odpowiedź', 'wcrq') . '</span>';
+                    } elseif ($detail['is_correct'] === false) {
+                        $status = '<span class="wcrq-answer-status wcrq-answer-status--incorrect">' . esc_html__('Błędna odpowiedź', 'wcrq') . '</span>';
+                    }
+                    echo '<li>';
+                    echo '<strong>' . esc_html($detail['label']) . '</strong>';
+                    if (!empty($detail['question'])) {
+                        echo '<div>' . esc_html($detail['question']) . '</div>';
+                    }
+                    if (!empty($detail['image'])) {
+                        echo '<div><img src="' . esc_url($detail['image']) . '" alt="" class="wcrq-result-image" /></div>';
+                    }
+                    echo '<div>' . sprintf(esc_html__('Odpowiedź uczestnika: %s', 'wcrq'), esc_html($selected_text)) . '</div>';
+                    echo '<div>' . sprintf(esc_html__('Prawidłowa odpowiedź: %s', 'wcrq'), esc_html($correct_text)) . '</div>';
+                    if ($status) {
+                        echo '<div>' . $status . '</div>';
+                    }
+                    echo '</li>';
+                }
+                echo '</ol></details>';
+            } else {
+                echo esc_html__('Brak danych.', 'wcrq');
+            }
+            echo '</td></tr>';
         }
         echo '</tbody></table>';
     } else {
-        echo '<p>' . __('Brak wyników.', 'wcrq') . '</p>';
+        echo '<p>' . esc_html__('Brak wyników.', 'wcrq') . '</p>';
     }
     echo '</div>';
 }
@@ -783,13 +1022,25 @@ function wcrq_quiz_shortcode() {
         $_SESSION['wcrq_questions'] = $questions;
     }
 
-    wp_enqueue_script('wcrq-quiz', plugins_url('assets/js/quiz.js', __FILE__), [], '0.2', true);
+    $result_id = wcrq_ensure_result_record($questions);
+
+    wp_enqueue_script('wcrq-quiz', plugins_url('assets/js/quiz.js', __FILE__), [], '0.3', true);
+    wp_localize_script('wcrq-quiz', 'wcrqQuizData', [
+        'ajaxUrl' => admin_url('admin-ajax.php'),
+        'saveNonce' => wp_create_nonce('wcrq_save_answer'),
+        'violationNonce' => wp_create_nonce('wcrq_log_violation'),
+        'resultId' => $result_id,
+        'violationMessage' => esc_html__('Opuszczanie strony jest zabronione. Każde naruszenie zostaje zapisane w wynikach.', 'wcrq')
+    ]);
+
     $out = '<form method="post" class="wcrq-quiz wcrq-no-js" data-duration="' . intval($remaining) . '" data-allow-navigation="' . ($allow_navigation ? '1' : '0') . '">';
     $out .= wp_nonce_field('wcrq_quiz', 'wcrq_quiz_nonce', true, false);
+    $out .= '<div class="wcrq-quiz-warning" aria-live="polite" hidden></div>';
 
     $out .= '<div class="wcrq-question-tabs" role="tablist">';
     foreach ($questions as $idx => $q) {
-        $out .= '<button type="button" class="wcrq-question-tab" data-index="' . intval($idx) . '" role="tab">' . sprintf(__('Pytanie %d', 'wcrq'), $idx + 1) . '</button>';
+        $label = sprintf(__('Pytanie %d', 'wcrq'), $idx + 1);
+        $out .= '<button type="button" class="wcrq-question-tab" data-index="' . intval($idx) . '" role="tab" aria-label="' . esc_attr($label) . '"><span aria-hidden="true">' . intval($idx + 1) . '</span><span class="screen-reader-text">' . esc_html($label) . '</span></button>';
     }
     $out .= '</div>';
 
@@ -865,29 +1116,60 @@ function wcrq_handle_quiz_submit() {
     }
 
     $questions = $_SESSION['wcrq_questions'];
-    $answers = [];
+    $participant_id = intval($_SESSION['wcrq_participant']);
+    $result_id = isset($_SESSION['wcrq_result_id']) ? intval($_SESSION['wcrq_result_id']) : 0;
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'wcrq_results';
+    if ($result_id <= 0) {
+        $result_id = wcrq_ensure_result_record($questions);
+    }
+
+    $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d AND participant_id = %d", $result_id, $participant_id));
+    if (!$row) {
+        return '<p>' . __('Sesja wygasła.', 'wcrq') . '</p>';
+    }
+
+    $stored_answers = maybe_unserialize($row->answers);
+    if (!is_array($stored_answers)) {
+        $stored_answers = [];
+    }
+    if (empty($stored_answers['questions'])) {
+        $stored_answers['questions'] = wcrq_prepare_questions_snapshot($questions);
+    }
+
+    $responses = isset($stored_answers['responses']) && is_array($stored_answers['responses']) ? $stored_answers['responses'] : [];
     $correct = 0;
     foreach ($questions as $idx => $q) {
         $given = isset($_POST['q' . $idx]) ? intval($_POST['q' . $idx]) : -1;
-        $answers[$idx] = $given;
+        $responses[$idx] = $given;
         if ($given === intval($q['correct'])) {
             $correct++;
         }
     }
-    $score = count($questions) ? round($correct / count($questions) * 100, 2) : 0;
 
-    global $wpdb;
-    $table = $wpdb->prefix . 'wcrq_results';
-    $wpdb->insert($table, [
-        'participant_id' => $_SESSION['wcrq_participant'],
+    $stored_answers['responses'] = $responses;
+    $question_count = count($questions);
+    $score = $question_count ? round($correct / $question_count * 100, 2) : 0;
+
+    $now_timestamp = current_time('timestamp');
+    $end_mysql = wp_date('Y-m-d H:i:s', $now_timestamp);
+    $start_timestamp = isset($_SESSION['wcrq_started']) ? intval($_SESSION['wcrq_started']) : wcrq_local_datetime_to_timestamp($row->start_time);
+    $duration = max(0, $now_timestamp - intval($start_timestamp));
+
+    $wpdb->update($table, [
         'score' => $score,
-        'start_time' => date('Y-m-d H:i:s', $_SESSION['wcrq_started']),
-        'end_time' => current_time('mysql'),
-        'answers' => maybe_serialize($answers)
+        'end_time' => $end_mysql,
+        'duration_seconds' => $duration,
+        'is_completed' => 1,
+        'answers' => maybe_serialize($stored_answers),
+    ], [
+        'id' => $result_id,
     ]);
 
     unset($_SESSION['wcrq_questions']);
     unset($_SESSION['wcrq_started']);
+    unset($_SESSION['wcrq_result_id']);
 
     $options = get_option('wcrq_settings');
     $message = '';
@@ -901,5 +1183,137 @@ function wcrq_handle_quiz_submit() {
         $message = '<p>' . __('Twoje odpowiedzi zostały zapisane.', 'wcrq') . '</p>';
     }
     return $message;
+}
+
+function wcrq_ajax_save_answer() {
+    check_ajax_referer('wcrq_save_answer', 'nonce');
+
+    if (empty($_SESSION['wcrq_participant'])) {
+        wp_send_json_error(['message' => __('Brak aktywnej sesji.', 'wcrq')], 403);
+    }
+
+    $question = isset($_POST['question']) ? intval($_POST['question']) : -1;
+    $answer = isset($_POST['answer']) ? intval($_POST['answer']) : -1;
+    $result_id = isset($_POST['resultId']) ? intval($_POST['resultId']) : (isset($_SESSION['wcrq_result_id']) ? intval($_SESSION['wcrq_result_id']) : 0);
+
+    if ($question < 0 || $result_id <= 0) {
+        wp_send_json_error(['message' => __('Nieprawidłowe dane.', 'wcrq')], 400);
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'wcrq_results';
+    $participant_id = intval($_SESSION['wcrq_participant']);
+    $row = $wpdb->get_row($wpdb->prepare("SELECT answers, start_time FROM $table WHERE id = %d AND participant_id = %d", $result_id, $participant_id));
+
+    if (!$row) {
+        wp_send_json_error(['message' => __('Wynik nie został odnaleziony.', 'wcrq')], 404);
+    }
+
+    $answers = maybe_unserialize($row->answers);
+    if (!is_array($answers)) {
+        $answers = [];
+    }
+    if (empty($answers['responses']) || !is_array($answers['responses'])) {
+        $answers['responses'] = [];
+    }
+    $answers['responses'][$question] = $answer;
+
+    $now_timestamp = current_time('timestamp');
+    $duration = max(0, $now_timestamp - wcrq_local_datetime_to_timestamp($row->start_time));
+
+    $wpdb->update($table, [
+        'answers' => maybe_serialize($answers),
+        'end_time' => wp_date('Y-m-d H:i:s', $now_timestamp),
+        'duration_seconds' => $duration,
+    ], [
+        'id' => $result_id,
+    ]);
+
+    wp_send_json_success();
+}
+add_action('wp_ajax_wcrq_save_answer', 'wcrq_ajax_save_answer');
+add_action('wp_ajax_nopriv_wcrq_save_answer', 'wcrq_ajax_save_answer');
+
+function wcrq_ajax_log_violation() {
+    check_ajax_referer('wcrq_log_violation', 'nonce');
+
+    if (empty($_SESSION['wcrq_participant']) || empty($_SESSION['wcrq_result_id'])) {
+        wp_send_json_error(['message' => __('Brak aktywnej sesji.', 'wcrq')], 403);
+    }
+
+    $result_id = intval($_SESSION['wcrq_result_id']);
+    global $wpdb;
+    $table = $wpdb->prefix . 'wcrq_results';
+    $participant_id = intval($_SESSION['wcrq_participant']);
+    $row = $wpdb->get_row($wpdb->prepare("SELECT violations FROM $table WHERE id = %d AND participant_id = %d", $result_id, $participant_id));
+    if (!$row) {
+        wp_send_json_error(['message' => __('Wynik nie został odnaleziony.', 'wcrq')], 404);
+    }
+
+    $count = intval($row->violations) + 1;
+    $wpdb->update($table, ['violations' => $count], ['id' => $result_id]);
+
+    wp_send_json_success(['count' => $count]);
+}
+add_action('wp_ajax_wcrq_log_violation', 'wcrq_ajax_log_violation');
+add_action('wp_ajax_nopriv_wcrq_log_violation', 'wcrq_ajax_log_violation');
+
+function wcrq_get_results_rows() {
+    global $wpdb;
+    $pt = $wpdb->prefix . 'wcrq_participants';
+    $rt = $wpdb->prefix . 'wcrq_results';
+
+    return $wpdb->get_results("SELECT r.*, p.name, p.email, p.class, p.school FROM $rt r JOIN $pt p ON r.participant_id = p.id ORDER BY r.score DESC, r.duration_seconds ASC, r.end_time DESC");
+}
+
+function wcrq_export_results_csv($rows) {
+    $filename = 'wcr-quiz-wyniki-' . wp_date('Y-m-d-His') . '.csv';
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename=' . $filename);
+    $output = fopen('php://output', 'w');
+    fputcsv($output, [
+        __('Imię i nazwisko', 'wcrq'),
+        __('Email', 'wcrq'),
+        __('Szkoła', 'wcrq'),
+        __('Klasa', 'wcrq'),
+        __('Wynik (%)', 'wcrq'),
+        __('Czas (HH:MM:SS)', 'wcrq'),
+        __('Naruszenia', 'wcrq'),
+        __('Ukończono', 'wcrq'),
+        __('Start', 'wcrq'),
+        __('Koniec', 'wcrq'),
+        __('Szczegóły odpowiedzi', 'wcrq'),
+    ]);
+
+    foreach ($rows as $row) {
+        $duration_seconds = intval($row->duration_seconds);
+        if ($duration_seconds <= 0) {
+            $duration_seconds = max(0, wcrq_local_datetime_to_timestamp($row->end_time) - wcrq_local_datetime_to_timestamp($row->start_time));
+        }
+        $details = wcrq_extract_result_details($row->answers);
+        $detail_strings = [];
+        foreach ($details as $detail) {
+            $selected_text = ($detail['selected'] >= 0 && isset($detail['answers'][$detail['selected']])) ? $detail['answers'][$detail['selected']] : __('Brak odpowiedzi', 'wcrq');
+            $correct_text = ($detail['correct'] !== null && $detail['correct'] >= 0 && isset($detail['answers'][$detail['correct']])) ? $detail['answers'][$detail['correct']] : __('Brak danych', 'wcrq');
+            $detail_strings[] = $detail['label'] . ': ' . $selected_text . ' / ' . sprintf(__('Poprawna: %s', 'wcrq'), $correct_text);
+        }
+
+        fputcsv($output, [
+            $row->name,
+            $row->email,
+            $row->school,
+            $row->class,
+            number_format_i18n($row->score, 2),
+            wcrq_format_duration($duration_seconds),
+            intval($row->violations),
+            $row->is_completed ? __('Tak', 'wcrq') : __('Nie', 'wcrq'),
+            $row->start_time,
+            $row->end_time,
+            implode(' | ', $detail_strings),
+        ]);
+    }
+
+    fclose($output);
+    exit;
 }
 
