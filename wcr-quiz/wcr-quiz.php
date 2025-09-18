@@ -242,6 +242,16 @@ function wcrq_admin_menu() {
 }
 add_action('admin_menu', 'wcrq_admin_menu');
 
+function wcrq_admin_enqueue_assets($hook_suffix) {
+    if (strpos($hook_suffix, 'wcrq_results') === false) {
+        return;
+    }
+
+    wp_enqueue_style('wcrq-admin-results', plugins_url('assets/css/results-admin.css', __FILE__), [], '0.1');
+    wp_enqueue_script('wcrq-admin-results', plugins_url('assets/js/results.js', __FILE__), [], '0.1', true);
+}
+add_action('admin_enqueue_scripts', 'wcrq_admin_enqueue_assets');
+
 function wcrq_get_polish_timezone() {
     try {
         return new DateTimeZone('Europe/Warsaw');
@@ -983,7 +993,7 @@ function wcrq_results_page_html() {
         $is_confirmed = false;
 
         if ($confirmation !== '') {
-            if ($confirmation === '1+2=3') {
+            if ($confirmation === '3' || $confirmation === '1+2=3') {
                 $is_confirmed = true;
             } elseif ($user && $user->exists() && wp_check_password($raw_confirmation, $user->user_pass, $user->ID)) {
                 $is_confirmed = true;
@@ -1060,12 +1070,16 @@ function wcrq_results_page_html() {
         echo '<div class="' . esc_attr($class) . '"><p>' . esc_html($notice['text']) . '</p></div>';
     }
 
-    $confirm_all = esc_js(__('Czy na pewno usunąć wszystkie wyniki?', 'wcrq'));
-    echo '<form method="post" class="wcrq-results-clear" onsubmit="return confirm(\'' . $confirm_all . '\');">';
+    $confirm_all_title = esc_attr__('Usuń wszystkie wyniki', 'wcrq');
+    $confirm_all_message = esc_attr__('Aby usunąć wszystkie wyniki, wpisz wynik równania 1+2.', 'wcrq');
+    $prompt_label = esc_attr__('Wynik równania 1+2', 'wcrq');
+    $prompt_error = esc_attr__('Nieprawidłowy wynik. Spróbuj ponownie.', 'wcrq');
+    echo '<form method="post" class="wcrq-results-clear" data-confirm-title="' . $confirm_all_title . '" data-confirm-message="' . $confirm_all_message . '" data-prompt-label="' . $prompt_label . '" data-prompt-error="' . $prompt_error . '">';
     wp_nonce_field('wcrq_clear_results', 'wcrq_clear_results_nonce');
     echo '<p>';
-    echo '<label for="wcrq_clear_results_confirm">' . esc_html__('Aby usunąć wszystkie wyniki, wpisz swoje hasło (lub 1+2=3):', 'wcrq') . '</label> ';
-    echo '<input type="password" id="wcrq_clear_results_confirm" name="wcrq_clear_results_confirm" class="regular-text" /> ';
+    echo '<input type="hidden" name="wcrq_clear_results_confirm" class="wcrq-results-clear__value" value="" /> ';
+    echo '<span class="description wcrq-results-clear__description">' . esc_html__('Kliknij przycisk, aby potwierdzić usunięcie w dodatkowym oknie.', 'wcrq') . '</span> ';
+    echo '<noscript><p class="noscript-wcrq-clear-warning">' . esc_html__('Aby usunąć wyniki, włącz obsługę JavaScript w przeglądarce.', 'wcrq') . '</p></noscript>';
     submit_button(__('Wyczyść wszystkie wyniki', 'wcrq'), 'delete', 'submit', false);
     echo '</p>';
     echo '</form>';
@@ -1148,7 +1162,10 @@ function wcrq_results_page_html() {
                 'wcrq_delete_result_' . intval($r->id)
             );
             echo '</td>';
-            echo '<td><a class="button button-secondary" href="' . esc_url($delete_url) . '" onclick="return confirm(\'' . esc_js(__('Czy na pewno usunąć ten wynik?', 'wcrq')) . '\');">' . esc_html__('Usuń wynik', 'wcrq') . '</a></td>';
+            $delete_label = esc_html__('Usuń wynik', 'wcrq');
+            $delete_title = esc_attr__('Usuń wynik', 'wcrq');
+            $delete_message = esc_attr__('Czy na pewno usunąć ten wynik?', 'wcrq');
+            echo '<td><a class="button button-secondary wcrq-result-delete" href="' . esc_url($delete_url) . '" data-confirm-title="' . $delete_title . '" data-confirm-message="' . $delete_message . '">' . $delete_label . '</a></td>';
             echo '</tr>';
         }
         echo '</tbody></table>';
