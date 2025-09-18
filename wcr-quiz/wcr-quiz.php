@@ -1428,13 +1428,40 @@ function wcrq_quiz_shortcode() {
 }
 add_shortcode('wcr_quiz', 'wcrq_quiz_shortcode');
 
-function wcrq_login_form($message = '') {
-    $out = '';
-    if ($message) {
-        $out .= '<p>' . esc_html($message) . '</p>';
+function wcrq_set_login_message($message) {
+    if (!session_id()) {
+        return;
     }
-    $out .= '<form method="post" class="wcrq-login" autocomplete="off">'
-        . '<p><label>Login<br /><input type="text" name="wcrq_login" required autocomplete="off" autocapitalize="none" autocorrect="off"></label></p>'
+
+    if ($message) {
+        $_SESSION['wcrq_login_message'] = (string) $message;
+    } else {
+        unset($_SESSION['wcrq_login_message']);
+    }
+}
+
+function wcrq_take_login_message() {
+    if (!session_id() || empty($_SESSION['wcrq_login_message'])) {
+        return '';
+    }
+
+    $message = (string) $_SESSION['wcrq_login_message'];
+    unset($_SESSION['wcrq_login_message']);
+
+    return $message;
+}
+
+function wcrq_login_form($message = '') {
+    $stored_message = wcrq_take_login_message();
+    if ($stored_message !== '') {
+        $message = $stored_message;
+    }
+
+    $out = '<form method="post" class="wcrq-login" autocomplete="off">';
+    if ($message) {
+        $out .= '<p class="wcrq-login-message" role="alert">' . esc_html($message) . '</p>';
+    }
+    $out .= '<p><label>Login<br /><input type="text" name="wcrq_login" required autocomplete="off" autocapitalize="none" autocorrect="off"></label></p>'
         . '<p><label>' . __('Hasło', 'wcrq') . '<br /><input type="password" name="wcrq_pass" required autocomplete="off"></label></p>'
         . '<p><button type="submit" name="wcrq_do_login" value="1">' . __('Wejdź', 'wcrq') . '</button></p>'
         . '</form>';
@@ -1450,7 +1477,7 @@ function wcrq_quiz_shortcode_process_login() {
         $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE login = %s", $login));
         if ($row && wp_check_password($pass, $row->password)) {
             if ($row->blocked) {
-                echo wcrq_login_form(__('Twoje konto zostało zablokowane.', 'wcrq'));
+                wcrq_set_login_message(__('Twoje konto zostało zablokowane.', 'wcrq'));
                 return false;
             }
             if (session_status() === PHP_SESSION_ACTIVE) {
@@ -1462,9 +1489,10 @@ function wcrq_quiz_shortcode_process_login() {
             $token = wcrq_generate_session_token();
             $_SESSION['wcrq_session_token'] = $token;
             wcrq_store_session_token(intval($row->id), $token);
+            wcrq_set_login_message('');
             return true;
         } else {
-            echo wcrq_login_form(__('Nieprawidłowy login lub hasło.', 'wcrq'));
+            wcrq_set_login_message(__('Nieprawidłowy login lub hasło.', 'wcrq'));
             return false;
         }
     }
