@@ -281,6 +281,15 @@ document.addEventListener('DOMContentLoaded', function() {
     return false;
   }
 
+  function findFirstUnanswered() {
+    for (var i = 0; i < questions.length; i += 1) {
+      if (!ensureAnswered(i)) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   questions.forEach(function(question, index) {
     question.addEventListener('change', function() {
       markAnswered(index);
@@ -325,6 +334,23 @@ document.addEventListener('DOMContentLoaded', function() {
       setActive(current + 1);
     });
   }
+
+  form.addEventListener('submit', function(event) {
+    if (form.dataset.submitted === '1') {
+      return;
+    }
+    var unansweredIndex = findFirstUnanswered();
+    if (unansweredIndex !== -1) {
+      event.preventDefault();
+      setActive(unansweredIndex);
+      var targetQuestion = questions[unansweredIndex];
+      if (targetQuestion && typeof targetQuestion.scrollIntoView === 'function') {
+        targetQuestion.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return;
+    }
+    form.dataset.submitted = '1';
+  });
 
   setActive(0);
 });
