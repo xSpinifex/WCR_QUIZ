@@ -3,24 +3,64 @@ document.addEventListener('DOMContentLoaded', function() {
   if (!form) return;
   form.classList.remove('wcrq-no-js');
 
-  var seconds = parseInt(form.dataset.duration || '0', 10);
-  if (!isNaN(seconds) && seconds > 0) {
-    var end = Date.now() + seconds * 1000;
-    var timer = document.createElement('div');
-    timer.className = 'wcrq-timer';
-    form.insertBefore(timer, form.firstChild);
-    var tick = function() {
-      var remain = Math.max(0, Math.round((end - Date.now()) / 1000));
-      var m = Math.floor(remain / 60);
-      var s = ('0' + (remain % 60)).slice(-2);
-      timer.textContent = m + ':' + s;
-      if (remain <= 0) {
-        form.submit();
-      } else {
-        setTimeout(tick, 1000);
-      }
-    };
-    tick();
+  var dataset = form.dataset || {};
+  var startTimestamp = parseInt(dataset.startTimestamp || '0', 10);
+  var endTimestamp = parseInt(dataset.endTimestamp || '0', 10);
+  var serverNow = parseInt(dataset.serverNow || '0', 10);
+  var allowNavigation = dataset.allowNavigation === '1';
+  var hasEnd = !isNaN(endTimestamp) && endTimestamp > 0;
+  var offsetMs = !isNaN(serverNow) && serverNow > 0 ? Date.now() - serverNow * 1000 : 0;
+
+  var timerPanel = form.querySelector('.wcrq-timer-panel');
+  var remainingEl = timerPanel ? timerPanel.querySelector('.wcrq-timer-remaining') : null;
+  var elapsedEl = timerPanel ? timerPanel.querySelector('.wcrq-timer-elapsed') : null;
+  var noLimitText = remainingEl ? remainingEl.textContent : '';
+
+  function getCurrentTimestamp() {
+    if (!offsetMs) {
+      return Math.round(Date.now() / 1000);
+    }
+    return Math.round((Date.now() - offsetMs) / 1000);
+  }
+
+  function formatDuration(totalSeconds) {
+    totalSeconds = Math.max(0, totalSeconds);
+    var hours = Math.floor(totalSeconds / 3600);
+    var minutes = Math.floor((totalSeconds % 3600) / 60);
+    var seconds = totalSeconds % 60;
+    var parts = [hours, minutes, seconds].map(function(value) {
+      return value < 10 ? '0' + value : String(value);
+    });
+    return parts.join(':');
+  }
+
+  function updateTimers() {
+    if (!timerPanel) {
+      return;
+    }
+    var nowTs = getCurrentTimestamp();
+    if (elapsedEl && !isNaN(startTimestamp) && startTimestamp > 0) {
+      var elapsedSeconds = Math.max(0, nowTs - startTimestamp);
+      elapsedEl.textContent = formatDuration(elapsedSeconds);
+    }
+    if (!remainingEl) {
+      return;
+    }
+    if (!hasEnd) {
+      remainingEl.textContent = noLimitText || remainingEl.textContent;
+      return;
+    }
+    var remainingSeconds = Math.max(0, endTimestamp - nowTs);
+    remainingEl.textContent = formatDuration(remainingSeconds);
+    if (remainingSeconds <= 0 && form.dataset.submitted !== '1') {
+      form.dataset.submitted = '1';
+      form.submit();
+    }
+  }
+
+  if (timerPanel) {
+    updateTimers();
+    setInterval(updateTimers, 1000);
   }
 
   var questions = Array.from(form.querySelectorAll('.wcrq-question'));
@@ -30,11 +70,12 @@ document.addEventListener('DOMContentLoaded', function() {
   var prevBtn = form.querySelector('.wcrq-prev');
   var nextBtn = form.querySelector('.wcrq-next');
   var submitBtn = form.querySelector('.wcrq-submit');
-  var allowNavigation = form.dataset.allowNavigation === '1';
   var current = 0;
   var quizData = window.wcrqQuizData || {};
   var resultId = parseInt(quizData.resultId || 0, 10);
-  var warningBox = form.querySelector('.wcrq-quiz-warning');
+  var shouldTrackViolations = !!quizData.trackViolations;
+  var showViolationMessage = !!quizData.showViolationMessage;
+  var warningBox = showViolationMessage ? form.querySelector('.wcrq-quiz-warning') : null;
   var violationCount = 0;
   var lastViolationAt = 0;
 
@@ -83,6 +124,9 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function logViolation() {
+    if (!shouldTrackViolations) {
+      return;
+    }
     if (!quizData.violationNonce || !resultId) {
       updateWarning(violationCount + 1);
       return;
@@ -125,7 +169,7 @@ document.addEventListener('DOMContentLoaded', function() {
     logViolation();
   }
 
-  if (warningBox) {
+  if (shouldTrackViolations) {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', function() {
       if (shouldRegisterViolation()) {

@@ -136,6 +136,7 @@ function wcrq_register_settings() {
     add_settings_field('randomize_questions', __('Losowa kolejność pytań', 'wcrq'), 'wcrq_field_randomize_questions', 'wcrq', 'wcrq_main');
     add_settings_field('allow_navigation', __('Zezwól na cofanie pytań', 'wcrq'), 'wcrq_field_allow_navigation', 'wcrq', 'wcrq_main');
     add_settings_field('show_results', __('Pokaż wynik użytkownikowi', 'wcrq'), 'wcrq_field_show_results', 'wcrq', 'wcrq_main');
+    add_settings_field('show_violations_to_users', __('Pokazuj naruszenia uczestnikom', 'wcrq'), 'wcrq_field_show_violations_to_users', 'wcrq', 'wcrq_main');
 }
 add_action('admin_init', 'wcrq_register_settings');
 
@@ -202,6 +203,7 @@ function wcrq_sanitize_settings($input) {
     $output['randomize_questions'] = !empty($input['randomize_questions']) ? 1 : 0;
     $output['allow_navigation'] = !empty($input['allow_navigation']) ? 1 : 0;
     $output['show_results'] = !empty($input['show_results']) ? 1 : 0;
+    $output['show_violations_to_users'] = !empty($input['show_violations_to_users']) ? 1 : 0;
 
     if (isset($input['questions'])) {
         $questions = $input['questions'];
@@ -831,6 +833,12 @@ function wcrq_field_show_results() {
     echo '<input type="checkbox" name="wcrq_settings[show_results]" value="1"' . checked(1, $checked, false) . ' />';
 }
 
+function wcrq_field_show_violations_to_users() {
+    $options = get_option('wcrq_settings');
+    $checked = !empty($options['show_violations_to_users']);
+    echo '<label><input type="checkbox" name="wcrq_settings[show_violations_to_users]" value="1"' . checked(1, $checked, false) . ' /> ' . esc_html__('Informuj uczestników o zarejestrowanych naruszeniach.', 'wcrq') . '</label>';
+}
+
 // Registration shortcode
 function wcrq_registration_shortcode() {
     $output = '';
@@ -957,12 +965,17 @@ function wcrq_quiz_shortcode() {
 
     global $wpdb;
     $ptable = $wpdb->prefix . 'wcrq_participants';
-    $blocked = $wpdb->get_var($wpdb->prepare("SELECT blocked FROM $ptable WHERE id = %d", $_SESSION['wcrq_participant']));
-    if ($blocked) {
+    $participant = $wpdb->get_row($wpdb->prepare("SELECT * FROM $ptable WHERE id = %d", $_SESSION['wcrq_participant']));
+    if (!$participant) {
+        unset($_SESSION['wcrq_participant'], $_SESSION['wcrq_started'], $_SESSION['wcrq_questions'], $_SESSION['wcrq_result_id']);
+        return wcrq_login_form(__('Sesja wygasła. Zaloguj się ponownie.', 'wcrq'));
+    }
+    if (!empty($participant->blocked)) {
         return '<p>' . __('Twoje konto zostało zablokowane.', 'wcrq') . '</p>';
     }
 
     $allow_navigation = !empty($options['allow_navigation']);
+    $show_violations_to_users = !empty($options['show_violations_to_users']);
 
     // Check if quiz started
     if (empty($_SESSION['wcrq_started'])) {
@@ -970,11 +983,33 @@ function wcrq_quiz_shortcode() {
             $_SESSION['wcrq_started'] = current_time('timestamp');
         } else {
             $pre_quiz = !empty($options['pre_quiz_text']) ? wpautop(wp_kses_post($options['pre_quiz_text'])) : '';
-            $warning = '';
-            if (!$allow_navigation) {
-                $warning = '<p class="wcrq-navigation-warning">' . esc_html__('Cofanie pytań jest niedozwolone', 'wcrq') . '</p>';
+            $sections = '';
+            $sections .= '<div class="wcrq-pre-quiz-section">';
+            $sections .= '<p class="wcrq-pre-quiz-welcome">' . sprintf(esc_html__('Witaj %s!', 'wcrq'), esc_html($participant->name)) . '</p>';
+            if ($pre_quiz) {
+                $sections .= '<div class="wcrq-pre-quiz-text">' . $pre_quiz . '</div>';
             }
-            return '<div class="wcrq-pre-quiz">' . $pre_quiz . $warning . '<form method="post" class="wcrq-start"><p><button type="submit" name="wcrq_start" value="1">' . __('Rozpocznij quiz', 'wcrq') . '</button></p></form></div>';
+            $rules = [];
+            if ($show_violations_to_users) {
+                $rules[] = esc_html__('Opuszczanie quizu w trakcie jego trwania jest zabronione. Każde naruszenie zostanie zapisane.', 'wcrq');
+            }
+            if (!$allow_navigation) {
+                $rules[] = esc_html__('Nie można wracać do poprzednich pytań podczas rozwiązywania quizu.', 'wcrq');
+            }
+            if ($rules) {
+                $sections .= '<ul class="wcrq-pre-quiz-rules">';
+                foreach ($rules as $rule) {
+                    $sections .= '<li>' . $rule . '</li>';
+                }
+                $sections .= '</ul>';
+            }
+            $sections .= '</div>';
+
+            if ($show_violations_to_users) {
+                $sections .= '<p class="wcrq-pre-quiz-notice">' . esc_html__('Wyjście ze strony quizu zostanie odnotowane jako naruszenie.', 'wcrq') . '</p>';
+            }
+
+            return '<div class="wcrq-pre-quiz">' . $sections . '<form method="post" class="wcrq-start"><p><button type="submit" name="wcrq_start" value="1">' . __('Rozpocznij quiz', 'wcrq') . '</button></p></form></div>';
         }
     }
 
@@ -1024,18 +1059,33 @@ function wcrq_quiz_shortcode() {
 
     $result_id = wcrq_ensure_result_record($questions);
 
-    wp_enqueue_script('wcrq-quiz', plugins_url('assets/js/quiz.js', __FILE__), [], '0.3', true);
+    $start_timestamp = isset($_SESSION['wcrq_started']) ? intval($_SESSION['wcrq_started']) : current_time('timestamp');
+    $start_display = wp_date(get_option('date_format') . ' ' . get_option('time_format'), $start_timestamp);
+    $end_timestamp = $end_time ? intval($end_time) : 0;
+
+    wp_enqueue_script('wcrq-quiz', plugins_url('assets/js/quiz.js', __FILE__), [], '0.4', true);
     wp_localize_script('wcrq-quiz', 'wcrqQuizData', [
         'ajaxUrl' => admin_url('admin-ajax.php'),
         'saveNonce' => wp_create_nonce('wcrq_save_answer'),
         'violationNonce' => wp_create_nonce('wcrq_log_violation'),
         'resultId' => $result_id,
-        'violationMessage' => esc_html__('Opuszczanie strony jest zabronione. Każde naruszenie zostaje zapisane w wynikach.', 'wcrq')
+        'violationMessage' => esc_html__('Opuszczanie strony jest zabronione. Każde naruszenie zostaje zapisane w wynikach.', 'wcrq'),
+        'showViolationMessage' => $show_violations_to_users ? 1 : 0,
+        'trackViolations' => 1
     ]);
 
-    $out = '<form method="post" class="wcrq-quiz wcrq-no-js" data-duration="' . intval($remaining) . '" data-allow-navigation="' . ($allow_navigation ? '1' : '0') . '">';
+    $out = '<form method="post" class="wcrq-quiz wcrq-no-js" data-duration="' . intval($remaining) . '" data-allow-navigation="' . ($allow_navigation ? '1' : '0') . '" data-start-timestamp="' . intval($start_timestamp) . '" data-end-timestamp="' . intval($end_timestamp) . '" data-server-now="' . intval($now) . '">';
     $out .= wp_nonce_field('wcrq_quiz', 'wcrq_quiz_nonce', true, false);
-    $out .= '<div class="wcrq-quiz-warning" aria-live="polite" hidden></div>';
+    if ($show_violations_to_users) {
+        $out .= '<div class="wcrq-quiz-warning" aria-live="polite" hidden></div>';
+    }
+
+    $out .= '<div class="wcrq-timer-panel">';
+    $out .= '<div class="wcrq-timer-row"><span class="wcrq-timer-label">' . esc_html__('Rozpoczęto:', 'wcrq') . '</span><span class="wcrq-timer-value wcrq-timer-start">' . esc_html($start_display) . '</span></div>';
+    $remaining_text = $end_timestamp ? '00:00:00' : esc_html__('Bez limitu', 'wcrq');
+    $out .= '<div class="wcrq-timer-row"><span class="wcrq-timer-label">' . esc_html__('Pozostały czas:', 'wcrq') . '</span><span class="wcrq-timer-value wcrq-timer-remaining">' . esc_html($remaining_text) . '</span></div>';
+    $out .= '<div class="wcrq-timer-row"><span class="wcrq-timer-label">' . esc_html__('Czas, który upłynął:', 'wcrq') . '</span><span class="wcrq-timer-value wcrq-timer-elapsed">00:00:00</span></div>';
+    $out .= '</div>';
 
     $out .= '<div class="wcrq-question-tabs" role="tablist">';
     foreach ($questions as $idx => $q) {
