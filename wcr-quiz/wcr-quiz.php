@@ -991,23 +991,22 @@ function wcrq_quiz_shortcode() {
             }
             $rules = [];
             if ($show_violations_to_users) {
-                $rules[] = esc_html__('Opuszczanie quizu w trakcie jego trwania jest zabronione. Każde naruszenie zostanie zapisane.', 'wcrq');
+                $rules[] = esc_html__('Opuszczanie quizu w trakcie jego trwania jest zabronione. Każde naruszenie zostanie zapisane, a wyjście ze strony quizu zostanie odnotowane jako naruszenie.', 'wcrq');
             }
             if (!$allow_navigation) {
                 $rules[] = esc_html__('Nie można wracać do poprzednich pytań podczas rozwiązywania quizu.', 'wcrq');
             }
             if ($rules) {
+                $sections .= '<div class="wcrq-pre-quiz-rules-block">';
+                $sections .= '<h3 class="wcrq-pre-quiz-rules-title">' . esc_html__('Zasady podczas quizu:', 'wcrq') . '</h3>';
                 $sections .= '<ul class="wcrq-pre-quiz-rules">';
                 foreach ($rules as $rule) {
                     $sections .= '<li>' . $rule . '</li>';
                 }
                 $sections .= '</ul>';
+                $sections .= '</div>';
             }
             $sections .= '</div>';
-
-            if ($show_violations_to_users) {
-                $sections .= '<p class="wcrq-pre-quiz-notice">' . esc_html__('Wyjście ze strony quizu zostanie odnotowane jako naruszenie.', 'wcrq') . '</p>';
-            }
 
             return '<div class="wcrq-pre-quiz">' . $sections . '<form method="post" class="wcrq-start"><p><button type="submit" name="wcrq_start" value="1">' . __('Rozpocznij quiz', 'wcrq') . '</button></p></form></div>';
         }
