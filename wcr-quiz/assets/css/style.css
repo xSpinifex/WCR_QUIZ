@@ -148,6 +148,16 @@
     background: #fef2f2;
 }
 
+.wcrq-question-error-message {
+    color: #b91c1c;
+    font-weight: 600;
+    margin-top: 0.75rem;
+}
+
+.wcrq-question-error-message[hidden] {
+    display: none;
+}
+
 .wcrq-question-nav {
     display: flex;
     gap: 1rem;

@@ -206,12 +206,52 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
 
+  function getQuestionErrorMessage(question) {
+    if (!question) {
+      return requiredMessage;
+    }
+    var message = question.dataset ? question.dataset.requiredMessage : '';
+    if (typeof message === 'string' && message.length) {
+      return message;
+    }
+    return requiredMessage;
+  }
+
+  function hideQuestionError(question) {
+    if (!question) {
+      return;
+    }
+    question.classList.remove('is-error');
+    var messageEl = question.querySelector('.wcrq-question-error-message');
+    if (messageEl) {
+      messageEl.textContent = '';
+      messageEl.setAttribute('hidden', 'hidden');
+    }
+  }
+
+  function showQuestionError(question) {
+    if (!question) {
+      return;
+    }
+    question.classList.add('is-error');
+    var messageEl = question.querySelector('.wcrq-question-error-message');
+    if (!messageEl) {
+      return;
+    }
+    messageEl.textContent = getQuestionErrorMessage(question);
+    messageEl.removeAttribute('hidden');
+  }
+
   function markAnswered(index) {
     if (!tabs.length) return;
-    var answered = !!questions[index].querySelector('input[type="radio"]:checked');
+    var question = questions[index];
+    if (!question) {
+      return;
+    }
+    var answered = !!question.querySelector('input[type="radio"]:checked');
     tabs[index].classList.toggle('is-answered', answered);
     if (answered) {
-      questions[index].classList.remove('is-error');
+      hideQuestionError(question);
     }
   }
 
@@ -229,14 +269,15 @@ document.addEventListener('DOMContentLoaded', function() {
     if (index < 0 || index >= questions.length) {
       return true;
     }
-    if (questions[index].querySelector('input[type="radio"]:checked')) {
-      questions[index].classList.remove('is-error');
+    var question = questions[index];
+    if (!question) {
       return true;
     }
-    questions[index].classList.add('is-error');
-    if (requiredMessage) {
-      window.alert(requiredMessage);
+    if (question.querySelector('input[type="radio"]:checked')) {
+      hideQuestionError(question);
+      return true;
     }
+    showQuestionError(question);
     return false;
   }
 

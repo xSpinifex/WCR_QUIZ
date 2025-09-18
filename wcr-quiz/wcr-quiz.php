@@ -1308,8 +1308,10 @@ function wcrq_quiz_shortcode() {
     }
     $out .= '</div>';
 
+    $required_message = esc_attr__('Zaznacz odpowiedź, zanim przejdziesz do kolejnego pytania.', 'wcrq');
+
     foreach ($questions as $idx => $q) {
-        $out .= '<div class="wcrq-question" data-index="' . intval($idx) . '" role="tabpanel">';
+        $out .= '<div class="wcrq-question" data-index="' . intval($idx) . '" role="tabpanel" data-required-message="' . $required_message . '">';
         $out .= '<p class="wcrq-question-title">' . esc_html($q['question']) . '</p>';
         if (!empty($q['image'])) {
             $out .= '<p><img src="' . esc_url($q['image']) . '" alt="" class="wcrq-question-image" /></p>';
@@ -1319,6 +1321,7 @@ function wcrq_quiz_shortcode() {
             $checked = (isset($saved_responses[$idx]) && intval($saved_responses[$idx]) === intval($a_idx)) ? ' checked' : '';
             $out .= '<label class="wcrq-answer"><input type="radio" name="' . esc_attr($name) . '" value="' . intval($a_idx) . '"' . $checked . '> ' . esc_html($answer) . '</label>';
         }
+        $out .= '<p class="wcrq-question-error-message" aria-live="polite" hidden></p>';
         $out .= '</div>';
     }
 
