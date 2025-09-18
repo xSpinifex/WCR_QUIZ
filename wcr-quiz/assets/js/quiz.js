@@ -32,6 +32,107 @@ document.addEventListener('DOMContentLoaded', function() {
   var submitBtn = form.querySelector('.wcrq-submit');
   var allowNavigation = form.dataset.allowNavigation === '1';
   var current = 0;
+  var quizData = window.wcrqQuizData || {};
+  var resultId = parseInt(quizData.resultId || 0, 10);
+  var warningBox = form.querySelector('.wcrq-quiz-warning');
+  var violationCount = 0;
+  var lastViolationAt = 0;
+
+  function updateWarning(count) {
+    violationCount = count;
+    if (!warningBox) {
+      return;
+    }
+    if (violationCount > 0) {
+      warningBox.textContent = (quizData.violationMessage || '') + ' (' + violationCount + ')';
+      warningBox.removeAttribute('hidden');
+    } else {
+      warningBox.textContent = '';
+      warningBox.setAttribute('hidden', 'hidden');
+    }
+  }
+
+  function postFormData(action, data) {
+    if (!quizData.ajaxUrl) {
+      return Promise.reject();
+    }
+    var formData = new FormData();
+    formData.append('action', action);
+    Object.keys(data).forEach(function(key) {
+      formData.append(key, data[key]);
+    });
+    return fetch(quizData.ajaxUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: formData
+    });
+  }
+
+  function saveAnswer(index, value) {
+    if (!quizData.saveNonce || !resultId) {
+      return;
+    }
+    postFormData('wcrq_save_answer', {
+      nonce: quizData.saveNonce,
+      question: index,
+      answer: value,
+      resultId: resultId
+    }).catch(function() {
+      return null;
+    });
+  }
+
+  function logViolation() {
+    if (!quizData.violationNonce || !resultId) {
+      updateWarning(violationCount + 1);
+      return;
+    }
+    postFormData('wcrq_log_violation', {
+      nonce: quizData.violationNonce
+    }).then(function(response) {
+      if (!response) {
+        updateWarning(violationCount + 1);
+        return;
+      }
+      return response.json();
+    }).then(function(payload) {
+      if (payload && payload.success && payload.data && typeof payload.data.count !== 'undefined') {
+        updateWarning(parseInt(payload.data.count, 10) || 0);
+      } else if (payload !== undefined) {
+        updateWarning(violationCount + 1);
+      }
+    }).catch(function() {
+      updateWarning(violationCount + 1);
+    });
+  }
+
+  function shouldRegisterViolation() {
+    var now = Date.now();
+    if (now - lastViolationAt < 1000) {
+      return false;
+    }
+    lastViolationAt = now;
+    return true;
+  }
+
+  function handleVisibilityChange() {
+    if (!document.hidden) {
+      return;
+    }
+    if (!shouldRegisterViolation()) {
+      return;
+    }
+    logViolation();
+  }
+
+  if (warningBox) {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', function() {
+      if (shouldRegisterViolation()) {
+        logViolation();
+      }
+    });
+  }
 
   function updateButtons() {
     if (prevBtn) {
@@ -79,6 +180,13 @@ document.addEventListener('DOMContentLoaded', function() {
   questions.forEach(function(question, index) {
     question.addEventListener('change', function() {
       markAnswered(index);
+      var checked = question.querySelector('input[type="radio"]:checked');
+      if (checked) {
+        var value = parseInt(checked.value || '0', 10);
+        if (!isNaN(value)) {
+          saveAnswer(index, value);
+        }
+      }
     });
   });
 
