@@ -78,6 +78,7 @@ document.addEventListener('DOMContentLoaded', function() {
   var warningBox = showViolationMessage ? form.querySelector('.wcrq-quiz-warning') : null;
   var violationCount = 0;
   var lastViolationAt = 0;
+  var requiredMessage = quizData.needAnswerMessage || '';
 
   function updateWarning(count) {
     violationCount = count;
@@ -209,6 +210,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (!tabs.length) return;
     var answered = !!questions[index].querySelector('input[type="radio"]:checked');
     tabs[index].classList.toggle('is-answered', answered);
+    if (answered) {
+      questions[index].classList.remove('is-error');
+    }
   }
 
   function setActive(index) {
@@ -219,6 +223,21 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     syncTabState(index);
     updateButtons();
+  }
+
+  function ensureAnswered(index) {
+    if (index < 0 || index >= questions.length) {
+      return true;
+    }
+    if (questions[index].querySelector('input[type="radio"]:checked')) {
+      questions[index].classList.remove('is-error');
+      return true;
+    }
+    questions[index].classList.add('is-error');
+    if (requiredMessage) {
+      window.alert(requiredMessage);
+    }
+    return false;
   }
 
   questions.forEach(function(question, index) {
@@ -248,6 +267,9 @@ document.addEventListener('DOMContentLoaded', function() {
       tab.addEventListener('click', function() {
         var idx = parseInt(tab.dataset.index || '0', 10);
         if (!isNaN(idx)) {
+          if (idx > current && !ensureAnswered(current)) {
+            return;
+          }
           setActive(idx);
         }
       });
@@ -256,6 +278,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
   if (nextBtn) {
     nextBtn.addEventListener('click', function() {
+      if (!ensureAnswered(current)) {
+        return;
+      }
       setActive(current + 1);
     });
   }
