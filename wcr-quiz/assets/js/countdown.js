@@ -31,6 +31,19 @@
       if(remaining <= 0){
         clearInterval(timer);
         el.classList.add('wcrq-countdown-finished');
+        var event;
+        if(typeof window.CustomEvent === 'function'){
+          event = new CustomEvent('wcrqCountdownFinished', { detail: { element: el } });
+        }else{
+          event = document.createEvent('Event');
+          event.initEvent('wcrqCountdownFinished', true, true);
+          event.detail = { element: el };
+        }
+        el.dispatchEvent(event);
+        document.dispatchEvent(event);
+        setTimeout(function(){
+          window.location.reload();
+        }, 1000);
         return;
       }
       remaining -= 1;
