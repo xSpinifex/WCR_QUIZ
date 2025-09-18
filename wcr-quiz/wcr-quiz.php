@@ -1060,9 +1060,9 @@ function wcrq_results_page_html() {
 
     $rows = wcrq_get_results_rows();
 
-    if (!empty($_GET['wcrq_export']) && '1' === $_GET['wcrq_export']) {
+    if (!empty($_GET['wcrq_export']) && 'xlsx' === $_GET['wcrq_export']) {
         if (!empty($_GET['_wpnonce']) && wp_verify_nonce($_GET['_wpnonce'], 'wcrq_export_results')) {
-            wcrq_export_results_csv($rows);
+            wcrq_export_results_excel($rows);
         } else {
             $notices[] = ['type' => 'error', 'text' => __('Nieprawidłowy token eksportu.', 'wcrq')];
         }
@@ -1105,8 +1105,8 @@ function wcrq_results_page_html() {
     echo '</form>';
 
     if ($rows) {
-        $export_url = wp_nonce_url(add_query_arg('wcrq_export', '1'), 'wcrq_export_results');
-        echo '<p><a href="' . esc_url($export_url) . '" class="button button-primary">' . esc_html__('Eksportuj do CSV', 'wcrq') . '</a></p>';
+        $export_url = wp_nonce_url(add_query_arg('wcrq_export', 'xlsx'), 'wcrq_export_results');
+        echo '<p><a href="' . esc_url($export_url) . '" class="button button-primary">' . esc_html__('Eksportuj do Excela', 'wcrq') . '</a></p>';
         echo '<table class="widefat fixed striped"><thead><tr>'
             . '<th>' . esc_html__('Uczeń', 'wcrq') . '</th>'
             . '<th>' . esc_html__('Email', 'wcrq') . '</th>'
@@ -1893,6 +1893,80 @@ function wcrq_export_results_csv($rows) {
     }
 
     fclose($output);
+    exit;
+}
+
+function wcrq_export_results_excel($rows) {
+    if (!class_exists('PhpOffice\\PhpSpreadsheet\\Spreadsheet')) {
+        $autoload = plugin_dir_path(__FILE__) . 'vendor/autoload.php';
+        if (file_exists($autoload)) {
+            require_once $autoload;
+        }
+    }
+
+    if (!class_exists('PhpOffice\\PhpSpreadsheet\\Spreadsheet')) {
+        wp_die(__('Biblioteka do eksportu wyników nie jest dostępna.', 'wcrq'));
+    }
+
+    $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+    $sheet = $spreadsheet->getActiveSheet();
+    $sheet->setTitle(__('Wyniki', 'wcrq'));
+
+    $headers = [
+        __('Imię i nazwisko', 'wcrq'),
+        __('Email', 'wcrq'),
+        __('Szkoła', 'wcrq'),
+        __('Klasa', 'wcrq'),
+        __('Wynik (%)', 'wcrq'),
+        __('Czas (HH:MM:SS)', 'wcrq'),
+        __('Naruszenia', 'wcrq'),
+        __('Ukończono', 'wcrq'),
+        __('Start', 'wcrq'),
+        __('Koniec', 'wcrq'),
+        __('Szczegóły odpowiedzi', 'wcrq'),
+    ];
+
+    foreach ($headers as $index => $label) {
+        $sheet->setCellValueByColumnAndRow($index + 1, 1, $label);
+    }
+
+    $rowNumber = 2;
+    foreach ($rows as $row) {
+        $duration_seconds = intval($row->duration_seconds);
+        if ($duration_seconds <= 0) {
+            $duration_seconds = max(0, wcrq_local_datetime_to_timestamp($row->end_time) - wcrq_local_datetime_to_timestamp($row->start_time));
+        }
+
+        $details = wcrq_extract_result_details($row->answers);
+        $detail_strings = [];
+        foreach ($details as $detail) {
+            $selected_text = ($detail['selected'] >= 0 && isset($detail['answers'][$detail['selected']])) ? $detail['answers'][$detail['selected']] : __('Brak odpowiedzi', 'wcrq');
+            $correct_text = ($detail['correct'] !== null && $detail['correct'] >= 0 && isset($detail['answers'][$detail['correct']])) ? $detail['answers'][$detail['correct']] : __('Brak danych', 'wcrq');
+            $detail_strings[] = $detail['label'] . ': ' . $selected_text . ' / ' . sprintf(__('Poprawna: %s', 'wcrq'), $correct_text);
+        }
+
+        $sheet->setCellValueByColumnAndRow(1, $rowNumber, $row->name);
+        $sheet->setCellValueByColumnAndRow(2, $rowNumber, $row->email);
+        $sheet->setCellValueByColumnAndRow(3, $rowNumber, $row->school);
+        $sheet->setCellValueByColumnAndRow(4, $rowNumber, $row->class);
+        $sheet->setCellValueByColumnAndRow(5, $rowNumber, number_format_i18n($row->score, 2));
+        $sheet->setCellValueByColumnAndRow(6, $rowNumber, wcrq_format_duration($duration_seconds));
+        $sheet->setCellValueByColumnAndRow(7, $rowNumber, intval($row->violations));
+        $sheet->setCellValueByColumnAndRow(8, $rowNumber, $row->is_completed ? __('Tak', 'wcrq') : __('Nie', 'wcrq'));
+        $sheet->setCellValueByColumnAndRow(9, $rowNumber, $row->start_time);
+        $sheet->setCellValueByColumnAndRow(10, $rowNumber, $row->end_time);
+        $sheet->setCellValueByColumnAndRow(11, $rowNumber, implode("\n", $detail_strings));
+
+        $rowNumber++;
+    }
+
+    $filename = 'wcr-quiz-wyniki-' . wp_date('Y-m-d-His') . '.xlsx';
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Cache-Control: max-age=0');
+
+    $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+    $writer->save('php://output');
     exit;
 }
 

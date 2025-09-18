@@ -1,0 +1,9 @@
+{
+    "name": "wcr/quiz",
+    "description": "WCR Quiz plugin",
+    "type": "project",
+    "license": "GPL-2.0-or-later",
+    "require": {
+        "phpoffice/phpspreadsheet": "^1.29"
+    }
+}
