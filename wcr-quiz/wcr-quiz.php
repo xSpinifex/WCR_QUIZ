@@ -18,6 +18,89 @@ function wcrq_maybe_start_session() {
 }
 add_action('init', 'wcrq_maybe_start_session');
 
+function wcrq_reset_quiz_progress() {
+    unset(
+        $_SESSION['wcrq_questions'],
+        $_SESSION['wcrq_started'],
+        $_SESSION['wcrq_result_id'],
+        $_SESSION['wcrq_saved_responses']
+    );
+}
+
+function wcrq_clear_participant_session($participant_id = 0, $keep_db_token = false) {
+    wcrq_reset_quiz_progress();
+    unset($_SESSION['wcrq_participant'], $_SESSION['wcrq_session_token']);
+
+    if ($participant_id > 0 && !$keep_db_token) {
+        global $wpdb;
+        $table = $wpdb->prefix . 'wcrq_participants';
+        $wpdb->update($table, [
+            'active_session_token' => '',
+            'active_session_started' => null,
+        ], [
+            'id' => intval($participant_id),
+        ]);
+    }
+}
+
+function wcrq_generate_session_token() {
+    return wp_generate_password(64, false, false);
+}
+
+function wcrq_store_session_token($participant_id, $token) {
+    global $wpdb;
+    $table = $wpdb->prefix . 'wcrq_participants';
+    $wpdb->update($table, [
+        'active_session_token' => $token,
+        'active_session_started' => current_time('mysql'),
+    ], [
+        'id' => intval($participant_id),
+    ]);
+}
+
+function wcrq_get_participant_row($participant_id) {
+    if ($participant_id <= 0) {
+        return null;
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'wcrq_participants';
+
+    return $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d", $participant_id));
+}
+
+function wcrq_require_active_participant() {
+    if (empty($_SESSION['wcrq_participant'])) {
+        return new WP_Error('no_session', __('Sesja wygasła. Zaloguj się ponownie.', 'wcrq'));
+    }
+
+    $participant_id = intval($_SESSION['wcrq_participant']);
+    $participant = wcrq_get_participant_row($participant_id);
+    if (!$participant) {
+        wcrq_clear_participant_session();
+        return new WP_Error('no_session', __('Sesja wygasła. Zaloguj się ponownie.', 'wcrq'));
+    }
+
+    $session_token = isset($_SESSION['wcrq_session_token']) ? (string) $_SESSION['wcrq_session_token'] : '';
+    $db_token = isset($participant->active_session_token) ? (string) $participant->active_session_token : '';
+
+    $is_match = false;
+    if ($session_token && $db_token) {
+        if (function_exists('hash_equals')) {
+            $is_match = hash_equals($db_token, $session_token);
+        } else {
+            $is_match = $db_token === $session_token && strlen($db_token) === strlen($session_token);
+        }
+    }
+
+    if (!$is_match) {
+        wcrq_clear_participant_session(intval($participant->id), true);
+        return new WP_Error('session_conflict', __('Twoja sesja została zakończona, ponieważ zalogowano się na innym urządzeniu.', 'wcrq'));
+    }
+
+    return $participant;
+}
+
 // Enqueue frontend styles
 function wcrq_enqueue_assets() {
     wp_enqueue_style('wcrq-style', plugins_url('assets/css/style.css', __FILE__), [], '0.1');
@@ -41,6 +124,8 @@ function wcrq_activate() {
         password varchar(255) NOT NULL,
         pass_plain varchar(255) NOT NULL,
         blocked tinyint(1) NOT NULL DEFAULT 0,
+        active_session_token varchar(64) NOT NULL DEFAULT '',
+        active_session_started datetime DEFAULT NULL,
         created datetime DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY  (id),
         UNIQUE KEY login (login)
@@ -79,6 +164,14 @@ function wcrq_maybe_update_participants_table() {
     $pass_plain_exists = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'pass_plain'));
     if (!$pass_plain_exists) {
         $wpdb->query("ALTER TABLE $table ADD pass_plain varchar(255) NOT NULL DEFAULT ''");
+    }
+    $session_token_exists = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'active_session_token'));
+    if (!$session_token_exists) {
+        $wpdb->query("ALTER TABLE $table ADD active_session_token varchar(64) NOT NULL DEFAULT ''");
+    }
+    $session_started_exists = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'active_session_started'));
+    if (!$session_started_exists) {
+        $wpdb->query("ALTER TABLE $table ADD active_session_started datetime DEFAULT NULL");
     }
 }
 add_action('plugins_loaded', 'wcrq_maybe_update_participants_table');
@@ -433,7 +526,7 @@ function wcrq_get_latest_completed_result_row($participant_id) {
 function wcrq_sync_active_result_session($participant_id) {
     $row = wcrq_get_active_result_row($participant_id);
     if (!$row) {
-        unset($_SESSION['wcrq_result_id'], $_SESSION['wcrq_saved_responses']);
+        wcrq_reset_quiz_progress();
         return null;
     }
 
@@ -545,13 +638,14 @@ function wcrq_finalize_expired_results() {
 add_action('init', 'wcrq_finalize_expired_results');
 
 function wcrq_ensure_result_record($questions) {
-    if (empty($_SESSION['wcrq_participant'])) {
+    $participant = wcrq_require_active_participant();
+    if (is_wp_error($participant)) {
         return 0;
     }
 
     global $wpdb;
     $table = $wpdb->prefix . 'wcrq_results';
-    $participant_id = intval($_SESSION['wcrq_participant']);
+    $participant_id = intval($participant->id);
     $result_id = isset($_SESSION['wcrq_result_id']) ? intval($_SESSION['wcrq_result_id']) : 0;
 
     if ($result_id > 0) {
@@ -1135,32 +1229,27 @@ function wcrq_quiz_shortcode() {
     $remaining = $end_time ? max(0, $end_time - $now) : 0;
 
     // Check login
-    if (empty($_SESSION['wcrq_participant'])) {
-        return wcrq_login_form();
+    $participant = wcrq_require_active_participant();
+    if (is_wp_error($participant)) {
+        return wcrq_login_form($participant->get_error_message());
     }
-
     global $wpdb;
-    $ptable = $wpdb->prefix . 'wcrq_participants';
-    $participant = $wpdb->get_row($wpdb->prepare("SELECT * FROM $ptable WHERE id = %d", $_SESSION['wcrq_participant']));
-    if (!$participant) {
-        unset($_SESSION['wcrq_participant'], $_SESSION['wcrq_started'], $_SESSION['wcrq_questions'], $_SESSION['wcrq_result_id']);
-        return wcrq_login_form(__('Sesja wygasła. Zaloguj się ponownie.', 'wcrq'));
-    }
     if (!empty($participant->blocked)) {
+        wcrq_clear_participant_session(intval($participant->id));
         return '<p>' . __('Twoje konto zostało zablokowane.', 'wcrq') . '</p>';
     }
 
     $active_result = wcrq_sync_active_result_session($participant->id);
     if ($end_time && $active_result && $now > $end_time) {
         wcrq_finalize_result_row($active_result, $end_time);
-        unset($_SESSION['wcrq_questions'], $_SESSION['wcrq_started'], $_SESSION['wcrq_result_id'], $_SESSION['wcrq_saved_responses']);
+        wcrq_reset_quiz_progress();
         $active_result = null;
     }
 
     if (!$active_result) {
         $completed_result = wcrq_get_latest_completed_result_row($participant->id);
         if ($completed_result) {
-            unset($_SESSION['wcrq_questions'], $_SESSION['wcrq_started'], $_SESSION['wcrq_result_id'], $_SESSION['wcrq_saved_responses']);
+            wcrq_clear_participant_session(intval($participant->id));
             $message = '<div class="wcrq-quiz-completed">';
             $message .= '<p>' . esc_html__('Quiz został już przez Ciebie ukończony.', 'wcrq') . '</p>';
             $message .= wcrq_build_completion_message(floatval($completed_result->score));
@@ -1175,6 +1264,9 @@ function wcrq_quiz_shortcode() {
     }
 
     $allow_navigation = !empty($options['allow_navigation']);
+    if (!empty($_SESSION['wcrq_started'])) {
+        $allow_navigation = false;
+    }
     $show_violations_to_users = !empty($options['show_violations_to_users']);
 
     // Check if quiz started
@@ -1341,9 +1433,9 @@ function wcrq_login_form($message = '') {
     if ($message) {
         $out .= '<p>' . esc_html($message) . '</p>';
     }
-    $out .= '<form method="post" class="wcrq-login">'
-        . '<p><label>Login<br /><input type="text" name="wcrq_login" required></label></p>'
-        . '<p><label>' . __('Hasło', 'wcrq') . '<br /><input type="password" name="wcrq_pass" required></label></p>'
+    $out .= '<form method="post" class="wcrq-login" autocomplete="off">'
+        . '<p><label>Login<br /><input type="text" name="wcrq_login" required autocomplete="off" autocapitalize="none" autocorrect="off"></label></p>'
+        . '<p><label>' . __('Hasło', 'wcrq') . '<br /><input type="password" name="wcrq_pass" required autocomplete="off"></label></p>'
         . '<p><button type="submit" name="wcrq_do_login" value="1">' . __('Wejdź', 'wcrq') . '</button></p>'
         . '</form>';
     return $out;
@@ -1361,7 +1453,15 @@ function wcrq_quiz_shortcode_process_login() {
                 echo wcrq_login_form(__('Twoje konto zostało zablokowane.', 'wcrq'));
                 return false;
             }
-            $_SESSION['wcrq_participant'] = $row->id;
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_regenerate_id(true);
+            }
+            wcrq_reset_quiz_progress();
+            unset($_SESSION['wcrq_participant'], $_SESSION['wcrq_session_token']);
+            $_SESSION['wcrq_participant'] = intval($row->id);
+            $token = wcrq_generate_session_token();
+            $_SESSION['wcrq_session_token'] = $token;
+            wcrq_store_session_token(intval($row->id), $token);
             return true;
         } else {
             echo wcrq_login_form(__('Nieprawidłowy login lub hasło.', 'wcrq'));
@@ -1390,7 +1490,11 @@ function wcrq_build_completion_message($score) {
 }
 
 function wcrq_handle_quiz_submit() {
-    if (empty($_SESSION['wcrq_questions']) || empty($_SESSION['wcrq_participant'])) {
+    $participant = wcrq_require_active_participant();
+    if (is_wp_error($participant)) {
+        return '<p>' . esc_html($participant->get_error_message()) . '</p>';
+    }
+    if (empty($_SESSION['wcrq_questions'])) {
         return '<p>' . __('Sesja wygasła.', 'wcrq') . '</p>';
     }
     $options = get_option('wcrq_settings');
@@ -1401,13 +1505,17 @@ function wcrq_handle_quiz_submit() {
     }
 
     $questions = $_SESSION['wcrq_questions'];
-    $participant_id = intval($_SESSION['wcrq_participant']);
+    $participant_id = intval($participant->id);
     $result_id = isset($_SESSION['wcrq_result_id']) ? intval($_SESSION['wcrq_result_id']) : 0;
 
     global $wpdb;
     $table = $wpdb->prefix . 'wcrq_results';
     if ($result_id <= 0) {
         $result_id = wcrq_ensure_result_record($questions);
+    }
+
+    if ($result_id <= 0) {
+        return '<p>' . __('Sesja wygasła.', 'wcrq') . '</p>';
     }
 
     $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d AND participant_id = %d", $result_id, $participant_id));
@@ -1452,10 +1560,7 @@ function wcrq_handle_quiz_submit() {
         'id' => $result_id,
     ]);
 
-    unset($_SESSION['wcrq_questions']);
-    unset($_SESSION['wcrq_started']);
-    unset($_SESSION['wcrq_result_id']);
-    unset($_SESSION['wcrq_saved_responses']);
+    wcrq_clear_participant_session($participant_id);
 
     return wcrq_build_completion_message($score);
 }
@@ -1463,8 +1568,10 @@ function wcrq_handle_quiz_submit() {
 function wcrq_ajax_save_answer() {
     check_ajax_referer('wcrq_save_answer', 'nonce');
 
-    if (empty($_SESSION['wcrq_participant'])) {
-        wp_send_json_error(['message' => __('Brak aktywnej sesji.', 'wcrq')], 403);
+    $participant = wcrq_require_active_participant();
+    if (is_wp_error($participant)) {
+        $code = $participant->get_error_code() === 'session_conflict' ? 409 : 403;
+        wp_send_json_error(['message' => $participant->get_error_message()], $code);
     }
 
     $question = isset($_POST['question']) ? intval($_POST['question']) : -1;
@@ -1477,7 +1584,7 @@ function wcrq_ajax_save_answer() {
 
     global $wpdb;
     $table = $wpdb->prefix . 'wcrq_results';
-    $participant_id = intval($_SESSION['wcrq_participant']);
+    $participant_id = intval($participant->id);
     $row = $wpdb->get_row($wpdb->prepare("SELECT answers, start_time, is_completed FROM $table WHERE id = %d AND participant_id = %d", $result_id, $participant_id));
 
     if (!$row) {
@@ -1525,14 +1632,20 @@ add_action('wp_ajax_nopriv_wcrq_save_answer', 'wcrq_ajax_save_answer');
 function wcrq_ajax_log_violation() {
     check_ajax_referer('wcrq_log_violation', 'nonce');
 
-    if (empty($_SESSION['wcrq_participant']) || empty($_SESSION['wcrq_result_id'])) {
+    $participant = wcrq_require_active_participant();
+    if (is_wp_error($participant)) {
+        $code = $participant->get_error_code() === 'session_conflict' ? 409 : 403;
+        wp_send_json_error(['message' => $participant->get_error_message()], $code);
+    }
+
+    if (empty($_SESSION['wcrq_result_id'])) {
         wp_send_json_error(['message' => __('Brak aktywnej sesji.', 'wcrq')], 403);
     }
 
     $result_id = intval($_SESSION['wcrq_result_id']);
     global $wpdb;
     $table = $wpdb->prefix . 'wcrq_results';
-    $participant_id = intval($_SESSION['wcrq_participant']);
+    $participant_id = intval($participant->id);
     $row = $wpdb->get_row($wpdb->prepare("SELECT violations FROM $table WHERE id = %d AND participant_id = %d", $result_id, $participant_id));
     if (!$row) {
         wp_send_json_error(['message' => __('Wynik nie został odnaleziony.', 'wcrq')], 404);

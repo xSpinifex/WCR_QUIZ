@@ -107,6 +107,18 @@ document.addEventListener('DOMContentLoaded', function() {
       method: 'POST',
       credentials: 'same-origin',
       body: formData
+    }).then(function(response) {
+      if (!response) {
+        return Promise.reject();
+      }
+      if (response.status === 409 || response.status === 403) {
+        window.location.reload();
+        return Promise.reject();
+      }
+      if (!response.ok) {
+        return Promise.reject();
+      }
+      return response;
     });
   }
 
