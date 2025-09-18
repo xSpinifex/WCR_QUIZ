@@ -191,7 +191,11 @@
               if (hiddenInput) {
                 hiddenInput.value = value;
               }
-              clearForm.submit();
+              if (typeof clearForm.submit === 'function') {
+                clearForm.submit();
+              } else {
+                HTMLFormElement.prototype.submit.call(clearForm);
+              }
             },
           });
         });
