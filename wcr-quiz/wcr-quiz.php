@@ -1624,7 +1624,7 @@ function wcrq_quiz_shortcode() {
         'showViolationMessage' => $show_violations_to_users ? 1 : 0,
         'trackViolations' => 1,
         'needAnswerMessage' => esc_html__('Zaznacz odpowiedź, zanim przejdziesz do kolejnego pytania.', 'wcrq'),
-        'sessionCheckInterval' => 15,
+        'sessionCheckInterval' => 5,
     ]);
 
     $out = '<form method="post" class="wcrq-quiz wcrq-no-js" data-duration="' . intval($remaining) . '" data-allow-navigation="' . ($allow_navigation ? '1' : '0') . '" data-start-timestamp="' . intval($start_timestamp) . '" data-end-timestamp="' . intval($end_timestamp) . '" data-server-now="' . intval($now) . '" data-current-question="' . intval($current_question) . '">';

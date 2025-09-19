@@ -376,6 +376,22 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(checkSession, sessionCheckInterval * 1000);
   }
 
+  if (sessionNonce) {
+    var triggerSessionCheck = function() {
+      checkSession().catch(function() {
+        return null;
+      });
+    };
+
+    window.addEventListener('focus', triggerSessionCheck);
+
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) {
+        triggerSessionCheck();
+      }
+    });
+  }
+
   if (allowNavigation) {
     if (prevBtn) {
       prevBtn.addEventListener('click', function() {
