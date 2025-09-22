@@ -246,6 +246,36 @@ function wcrq_register_settings() {
 }
 add_action('admin_init', 'wcrq_register_settings');
 
+function wcrq_get_default_registration_message() {
+    return __('Szanowny Użytkowniku,<br><br>z radością informujemy, że Twoje konto w WCR Quiz zostało pomyślnie utworzone.<br><br><strong>Dane logowania:</strong><br>• Login: {{login}}<br>• Hasło: {{haslo}}<br><br>W razie pytań lub problemów nasi konsultanci chętnie pomogą.<br><br>Z wyrazami szacunku,<br>Zespół WCR Quiz', 'wcrq');
+}
+
+function wcrq_get_registration_welcome_message() {
+    $message = get_option('wcrq_registration_welcome_message', '');
+
+    if (!is_string($message) || $message === '') {
+        $message = wcrq_get_default_registration_message();
+    }
+
+    return $message;
+}
+
+function wcrq_prepare_registration_email_body($login, $password) {
+    $template = wcrq_get_registration_welcome_message();
+    $template = wp_kses_post($template);
+
+    if (strpos($template, '{{login}}') === false || strpos($template, '{{haslo}}') === false) {
+        $template = wp_kses_post(wcrq_get_default_registration_message());
+    }
+
+    $replacements = [
+        '{{login}}' => esc_html($login),
+        '{{haslo}}' => esc_html($password),
+    ];
+
+    return strtr($template, $replacements);
+}
+
 function wcrq_admin_menu() {
     add_menu_page('WCR Quiz', 'WCR Quiz', 'manage_options', 'wcrq', 'wcrq_settings_page_html', 'dashicons-welcome-learn-more', 20);
     add_submenu_page('wcrq', __('Ustawienia quizu', 'wcrq'), __('Ustawienia quizu', 'wcrq'), 'manage_options', 'wcrq', 'wcrq_settings_page_html');
@@ -961,6 +991,29 @@ function wcrq_registrations_page_html() {
     global $wpdb;
     $table = $wpdb->prefix . 'wcrq_participants';
     $results_table = $wpdb->prefix . 'wcrq_results';
+    $notices = [];
+
+    if (!empty($_POST['wcrq_welcome_message_nonce']) && wp_verify_nonce($_POST['wcrq_welcome_message_nonce'], 'wcrq_save_welcome_message')) {
+        $raw_message = isset($_POST['wcrq_welcome_message']) ? wp_unslash($_POST['wcrq_welcome_message']) : '';
+        $sanitized_message = wp_kses_post($raw_message);
+        $has_login_placeholder = strpos($sanitized_message, '{{login}}') !== false;
+        $has_password_placeholder = strpos($sanitized_message, '{{haslo}}') !== false;
+
+        if (!$has_login_placeholder || !$has_password_placeholder) {
+            $notices[] = '<div class="error"><p>' . esc_html__('Wiadomość musi zawierać znaczniki {{login}} oraz {{haslo}}.', 'wcrq') . '</p></div>';
+            $welcome_message = $sanitized_message;
+        } else {
+            update_option('wcrq_registration_welcome_message', $sanitized_message);
+            $notices[] = '<div class="updated"><p>' . esc_html__('Wiadomość powitalna została zaktualizowana.', 'wcrq') . '</p></div>';
+            $welcome_message = $sanitized_message;
+        }
+    } else {
+        $welcome_message = wcrq_get_registration_welcome_message();
+    }
+
+    if (!isset($welcome_message)) {
+        $welcome_message = wcrq_get_registration_welcome_message();
+    }
 
     // Delete all accounts
     if (!empty($_POST['wcrq_delete_all_nonce']) && wp_verify_nonce($_POST['wcrq_delete_all_nonce'], 'wcrq_delete_all')) {
@@ -992,6 +1045,18 @@ function wcrq_registrations_page_html() {
 
     $rows = $wpdb->get_results("SELECT * FROM $table ORDER BY created DESC");
     echo '<div class="wrap"><h1>' . esc_html(__('Rejestracje', 'wcrq')) . '</h1>';
+    foreach ($notices as $notice_html) {
+        echo $notice_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+    }
+    echo '<h2>' . esc_html__('Wiadomość powitalna', 'wcrq') . '</h2>';
+    echo '<p class="description">' . esc_html__('Ta treść zostanie wysłana do uczestnika po rejestracji. Użyj znaczników {{login}} oraz {{haslo}} w miejscach, w których mają pojawić się dane logowania.', 'wcrq') . '</p>';
+    echo '<form method="post" class="wcrq-welcome-message-form">';
+    wp_nonce_field('wcrq_save_welcome_message', 'wcrq_welcome_message_nonce');
+    echo '<textarea name="wcrq_welcome_message" rows="8" class="large-text code">' . esc_textarea($welcome_message) . '</textarea>';
+    echo '<p>';
+    submit_button(__('Zapisz wiadomość', 'wcrq'), 'primary', 'wcrq_save_welcome_message', false);
+    echo '</p>';
+    echo '</form>';
     echo '<form method="post" style="margin-bottom:20px;">' . wp_nonce_field('wcrq_delete_all', 'wcrq_delete_all_nonce', true, false)
         . '<input type="password" name="wcrq_delete_all_pass" placeholder="' . esc_attr__('Hasło', 'wcrq') . '" required /> '
         . '<button type="submit" class="button button-danger" onclick="return confirm(\'Usunąć wszystkie konta?\');">' . __('Usuń wszystkie konta', 'wcrq') . '</button></form>';
@@ -1400,11 +1465,7 @@ function wcrq_registration_shortcode() {
                         }
                     } else {
                         $subject = __('Dane logowania do quizu', 'wcrq');
-                        $body = sprintf(
-                            __('Szanowny Użytkowniku,<br><br>z radością informujemy, że Twoje konto w WCR Quiz zostało pomyślnie utworzone.<br><br><strong>Dane logowania:</strong><br>• Login: %1$s<br>• Hasło: %2$s <br><br>W razie pytań lub problemów nasi konsultanci chętnie pomogą.<br><br>Z wyrazami szacunku,<br>Zespół WCR Quiz', 'wcrq'),
-                            esc_html($login),
-                            esc_html($password)
-                        );
+                        $body = wcrq_prepare_registration_email_body($login, $password);
                         $headers = ['Content-Type: text/html; charset=UTF-8'];
                         wp_mail($email, $subject, $body, $headers);
 
