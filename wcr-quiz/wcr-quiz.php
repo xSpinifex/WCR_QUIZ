@@ -1555,9 +1555,6 @@ function wcrq_quiz_shortcode() {
     }
 
     $allow_navigation = !empty($options['allow_navigation']);
-    if (!empty($_SESSION['wcrq_started'])) {
-        $allow_navigation = false;
-    }
     $show_violations_to_users = !empty($options['show_violations_to_users']);
 
     // Check if quiz started
@@ -1576,7 +1573,9 @@ function wcrq_quiz_shortcode() {
             if ($show_violations_to_users) {
                 $rules[] = esc_html__('Opuszczanie quizu w trakcie jego trwania jest zabronione. Każde naruszenie zostanie zapisane, a wyjście ze strony quizu zostanie odnotowane jako naruszenie.', 'wcrq');
             }
-            if (!$allow_navigation) {
+            if ($allow_navigation) {
+                $rules[] = esc_html__('Możesz wracać do poprzednich pytań w dowolnym momencie rozwiązywania quizu.', 'wcrq');
+            } else {
                 $rules[] = esc_html__('Nie można wracać do poprzednich pytań podczas rozwiązywania quizu.', 'wcrq');
             }
             if ($rules) {
