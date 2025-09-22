@@ -2,8 +2,8 @@
 /*
 Plugin Name: WCR Quiz
 Description: Prosty quiz z rejestracją i panelem zarządzania.
-Version: 0.1.0
-Author: OpenAI Assistant
+Version: 0.86.0
+Author: Marcin Maćkowiak
 */
 
 if (!defined('ABSPATH')) {
