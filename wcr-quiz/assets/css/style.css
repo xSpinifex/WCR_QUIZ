@@ -7,6 +7,9 @@
     --wcrq-green-darker: #004b00;
     --wcrq-text-primary: #ffffff;
     --wcrq-text-soft: #e5ffe5;
+    --wcrq-input-border: #1f4d2e;
+    --wcrq-input-background: #e6f7eb;
+    --wcrq-input-background-focus: #d3f1df;
 }
 
 .wcrq-registration, .wcrq-login, .wcrq-quiz {
@@ -35,12 +38,12 @@
     width: 100%;
     padding: 1rem;
     margin-top: 0.5rem;
-    border: 1px solid var(--wcrq-green-light);
+    border: 1px solid var(--wcrq-input-border);
     border-radius: 6px;
     box-sizing: border-box;
     font-size: 1.1rem;
-    background: rgba(0, 128, 0, 0.25);
-    color: var(--wcrq-text-primary);
+    background: var(--wcrq-input-background);
+    color: #000000;
     transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
@@ -49,12 +52,12 @@
     outline: none;
     border-color: var(--wcrq-green-lighter);
     box-shadow: 0 0 0 3px rgba(0, 166, 79, 0.35);
-    background: rgba(0, 128, 0, 0.35);
+    background: var(--wcrq-input-background-focus);
 }
 
 .wcrq-registration input::placeholder,
 .wcrq-login input::placeholder {
-    color: rgba(229, 255, 229, 0.8);
+    color: rgba(0, 0, 0, 0.55);
 }
 
 .wcrq-registration button,
@@ -62,7 +65,7 @@
 .wcrq-quiz button,
 .wcrq-start button,
 .wcrq-completion-close-button {
-    background: var(--wcrq-green-light);
+    background: linear-gradient(135deg, var(--wcrq-green-light), var(--wcrq-green));
     color: var(--wcrq-text-primary);
     padding: 1rem 2rem;
     border: 1px solid var(--wcrq-green-darker);
@@ -77,7 +80,7 @@
 .wcrq-quiz button:hover,
 .wcrq-start button:hover,
 .wcrq-completion-close-button:hover {
-    background: var(--wcrq-green-dark);
+    background: linear-gradient(135deg, var(--wcrq-green), var(--wcrq-green-dark));
     transform: translateY(-1px);
     box-shadow: 0 10px 20px rgba(0, 64, 0, 0.25);
 }
@@ -87,7 +90,7 @@
 .wcrq-quiz button:active,
 .wcrq-start button:active,
 .wcrq-completion-close-button:active {
-    background: var(--wcrq-green-darker);
+    background: linear-gradient(135deg, var(--wcrq-green-dark), var(--wcrq-green-darker));
     transform: translateY(0);
     box-shadow: none;
 }
