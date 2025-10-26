@@ -1893,6 +1893,7 @@ function wcrq_quiz_shortcode_process_login() {
         $pass = $_POST['wcrq_pass'] ?? '';
         $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE login = %s", $login));
         if ($row && wp_check_password($pass, $row->password)) {
+            $should_resume_start = !empty($_SESSION['wcrq_pending_start']);
             if ($row->blocked) {
                 wcrq_set_login_message(__('Twoje konto zostało zablokowane.', 'wcrq'), 'error');
                 return false;
@@ -1906,6 +1907,9 @@ function wcrq_quiz_shortcode_process_login() {
             $token = wcrq_generate_session_token();
             $_SESSION['wcrq_session_token'] = $token;
             wcrq_store_session_token(intval($row->id), $token);
+            if ($should_resume_start) {
+                $_SESSION['wcrq_pending_start'] = 1;
+            }
             wcrq_set_login_message('');
             return true;
         } else {
