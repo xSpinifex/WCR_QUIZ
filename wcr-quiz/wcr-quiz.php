@@ -1567,6 +1567,11 @@ function wcrq_quiz_shortcode() {
         unset($_SESSION['wcrq_pending_start']);
     }
 
+    // Handle submission as early as possible to always show results after finishing the quiz.
+    if (!empty($_POST['wcrq_quiz_nonce']) && wp_verify_nonce($_POST['wcrq_quiz_nonce'], 'wcrq_quiz')) {
+        return wcrq_handle_quiz_submit();
+    }
+
     if (empty($_SESSION['wcrq_started'])) {
         $should_show_login = false;
         $login_message = '';
@@ -1653,11 +1658,6 @@ function wcrq_quiz_shortcode() {
     $saved_responses = [];
     if (!empty($_SESSION['wcrq_saved_responses']) && is_array($_SESSION['wcrq_saved_responses'])) {
         $saved_responses = array_map('intval', $_SESSION['wcrq_saved_responses']);
-    }
-
-    // Handle submission
-    if (!empty($_POST['wcrq_quiz_nonce']) && wp_verify_nonce($_POST['wcrq_quiz_nonce'], 'wcrq_quiz')) {
-        return wcrq_handle_quiz_submit();
     }
 
     // Display quiz
