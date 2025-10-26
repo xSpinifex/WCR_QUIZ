@@ -1869,6 +1869,119 @@ function wcrq_take_login_message() {
     return [(string) $stored, ''];
 }
 
+function wcrq_completion_cookie_name() {
+    return 'wcrq_completion';
+}
+
+function wcrq_clear_completion_cookie() {
+    $name = wcrq_completion_cookie_name();
+    $path = defined('COOKIEPATH') ? COOKIEPATH : '/';
+    $domain = defined('COOKIE_DOMAIN') ? COOKIE_DOMAIN : '';
+
+    if (!headers_sent()) {
+        setcookie($name, '', time() - HOUR_IN_SECONDS, $path, $domain, is_ssl(), true);
+    }
+
+    unset($_COOKIE[$name]);
+}
+
+function wcrq_store_completion_cookie($participant_id, $result_id) {
+    $participant_id = intval($participant_id);
+    $result_id = intval($result_id);
+
+    if ($participant_id <= 0 || $result_id <= 0) {
+        return;
+    }
+
+    if (headers_sent()) {
+        return;
+    }
+
+    $payload = [
+        'p' => $participant_id,
+        'r' => $result_id,
+        't' => time(),
+    ];
+
+    $encoded = wp_json_encode($payload);
+    if (!is_string($encoded) || $encoded === '') {
+        return;
+    }
+
+    $secret = wp_salt('auth');
+    $signature = hash_hmac('sha256', $encoded, $secret);
+    $value = base64_encode($encoded . '::' . $signature);
+    if ($value === false) {
+        return;
+    }
+
+    $name = wcrq_completion_cookie_name();
+    $path = defined('COOKIEPATH') ? COOKIEPATH : '/';
+    $domain = defined('COOKIE_DOMAIN') ? COOKIE_DOMAIN : '';
+
+    setcookie($name, $value, time() + 600, $path, $domain, is_ssl(), true);
+}
+
+function wcrq_take_completion_cookie_message() {
+    $name = wcrq_completion_cookie_name();
+    if (empty($_COOKIE[$name])) {
+        return '';
+    }
+
+    $raw = base64_decode($_COOKIE[$name], true);
+    wcrq_clear_completion_cookie();
+
+    if (!is_string($raw) || $raw === '') {
+        return '';
+    }
+
+    $parts = explode('::', $raw, 2);
+    if (count($parts) !== 2) {
+        return '';
+    }
+
+    list($encoded, $signature) = $parts;
+    $expected = hash_hmac('sha256', $encoded, wp_salt('auth'));
+
+    $is_valid = false;
+    if (function_exists('hash_equals')) {
+        $is_valid = hash_equals($expected, $signature);
+    } else {
+        $is_valid = $expected === $signature && strlen($expected) === strlen($signature);
+    }
+
+    if (!$is_valid) {
+        return '';
+    }
+
+    $data = json_decode($encoded, true);
+    if (!is_array($data)) {
+        return '';
+    }
+
+    $participant_id = isset($data['p']) ? intval($data['p']) : 0;
+    $result_id = isset($data['r']) ? intval($data['r']) : 0;
+
+    if ($participant_id <= 0 || $result_id <= 0) {
+        return '';
+    }
+
+    global $wpdb;
+    $table = $wpdb->prefix . 'wcrq_results';
+
+    $row = $wpdb->get_row($wpdb->prepare(
+        "SELECT score, is_completed FROM $table WHERE id = %d AND participant_id = %d",
+        $result_id,
+        $participant_id
+    ));
+
+    if (!$row || intval($row->is_completed) !== 1) {
+        return '';
+    }
+
+    return '<div class="wcrq-quiz-completed">' . wcrq_build_completion_message(floatval($row->score)) . '</div>';
+}
+
 function wcrq_set_completion_message($message) {
     if (!session_id()) {
         return;
@@ -1888,14 +2001,14 @@ function wcrq_take_completion_message() {
         return $cached_message;
     }
 
-    if (!session_id() || empty($_SESSION['wcrq_completion_message'])) {
-        $cached_message = '';
+    if (session_id() && !empty($_SESSION['wcrq_completion_message'])) {
+        $cached_message = (string) $_SESSION['wcrq_completion_message'];
+        unset($_SESSION['wcrq_completion_message']);
+        wcrq_clear_completion_cookie();
         return $cached_message;
     }
 
-    $cached_message = (string) $_SESSION['wcrq_completion_message'];
-    unset($_SESSION['wcrq_completion_message']);
-
+    $cached_message = wcrq_take_completion_cookie_message();
     return $cached_message;
 }
 
@@ -2058,10 +2171,11 @@ function wcrq_handle_quiz_submit() {
         'id' => $result_id,
     ]);
 
-    wcrq_clear_participant_session($participant_id);
-
     $completion_markup = '<div class="wcrq-quiz-completed">' . wcrq_build_completion_message($score) . '</div>';
     wcrq_set_completion_message($completion_markup);
+    wcrq_store_completion_cookie($participant_id, $result_id);
+
+    wcrq_clear_participant_session($participant_id);
 
     return $completion_markup;
 }
