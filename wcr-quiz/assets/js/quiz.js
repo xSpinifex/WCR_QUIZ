@@ -350,6 +350,15 @@ document.addEventListener('DOMContentLoaded', function() {
     return -1;
   }
 
+  function areAllQuestionsAnswered() {
+    for (var i = 0; i < questions.length; i += 1) {
+      if (!questions[i].querySelector('input[type="radio"]:checked')) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   questions.forEach(function(question, index) {
     question.addEventListener('change', function() {
       markAnswered(index);
@@ -364,6 +373,22 @@ document.addEventListener('DOMContentLoaded', function() {
       saveAnswer(index, value).catch(function() {
         return null;
       });
+      if (
+        index === questions.length - 1 &&
+        current === index &&
+        submitBtn &&
+        form.dataset.submitted !== '1'
+      ) {
+        if (areAllQuestionsAnswered()) {
+          if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit(submitBtn);
+          } else {
+            form.dataset.submitted = '1';
+            submitBtn.disabled = true;
+            form.submit();
+          }
+        }
+      }
     });
   });
 
