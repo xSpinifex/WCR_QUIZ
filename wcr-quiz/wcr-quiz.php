@@ -2001,6 +2001,16 @@ function wcrq_take_completion_message() {
         return $cached_message;
     }
 
+    if (isset($_GET['wcrq_completion_closed'])) {
+        if (session_id() && isset($_SESSION['wcrq_completion_message'])) {
+            unset($_SESSION['wcrq_completion_message']);
+        }
+        wcrq_clear_completion_cookie();
+
+        $cached_message = '';
+        return $cached_message;
+    }
+
     if (session_id() && !empty($_SESSION['wcrq_completion_message'])) {
         $cached_message = (string) $_SESSION['wcrq_completion_message'];
         unset($_SESSION['wcrq_completion_message']);
@@ -2086,6 +2096,13 @@ function wcrq_build_completion_message($score) {
     $redirect_url = function_exists('get_permalink') ? get_permalink() : '';
     if (!$redirect_url) {
         $redirect_url = home_url('/');
+    }
+
+    if (function_exists('remove_query_arg')) {
+        $redirect_url = remove_query_arg('wcrq_completion_closed', $redirect_url);
+    }
+    if (function_exists('add_query_arg')) {
+        $redirect_url = add_query_arg('wcrq_completion_closed', '1', $redirect_url);
     }
 
     $message .= '<p class="wcrq-completion-actions"><a class="wcrq-completion-close-button" href="' . esc_url($redirect_url) . '">' . esc_html__('Zamknij', 'wcrq') . '</a></p>';
