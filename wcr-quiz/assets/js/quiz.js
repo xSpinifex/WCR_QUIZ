@@ -380,13 +380,7 @@ document.addEventListener('DOMContentLoaded', function() {
         form.dataset.submitted !== '1'
       ) {
         if (areAllQuestionsAnswered()) {
-          if (typeof form.requestSubmit === 'function') {
-            form.requestSubmit(submitBtn);
-          } else {
-            form.dataset.submitted = '1';
-            submitBtn.disabled = true;
-            form.submit();
-          }
+          submitBtn.focus();
         }
       }
     });
