@@ -36,7 +36,8 @@ function wcrq_reset_quiz_progress() {
         $_SESSION['wcrq_started'],
         $_SESSION['wcrq_result_id'],
         $_SESSION['wcrq_saved_responses'],
-        $_SESSION['wcrq_current_question']
+        $_SESSION['wcrq_current_question'],
+        $_SESSION['wcrq_pending_start']
     );
 }
 
@@ -130,6 +131,7 @@ function wcrq_activate() {
     $sql1 = "CREATE TABLE $participants_table (
         id mediumint(9) NOT NULL AUTO_INCREMENT,
         school varchar(150) NOT NULL,
+        gmina varchar(255) NOT NULL,
         name varchar(100) NOT NULL,
         class varchar(50) NOT NULL,
         email varchar(100) NOT NULL,
@@ -173,6 +175,10 @@ function wcrq_maybe_update_participants_table() {
     $blocked_exists = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'blocked'));
     if (!$blocked_exists) {
         $wpdb->query("ALTER TABLE $table ADD blocked tinyint(1) NOT NULL DEFAULT 0");
+    }
+    $gmina_exists = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'gmina'));
+    if (!$gmina_exists) {
+        $wpdb->query("ALTER TABLE $table ADD gmina varchar(255) NOT NULL DEFAULT '' AFTER school");
     }
     $pass_plain_exists = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM $table LIKE %s", 'pass_plain'));
     if (!$pass_plain_exists) {
@@ -1063,6 +1069,7 @@ function wcrq_registrations_page_html() {
     if ($rows) {
         echo '<table class="wp-list-table widefat fixed striped"><thead><tr>'
             . '<th>' . __('Szkoła', 'wcrq') . '</th>'
+            . '<th>' . __('Gmina', 'wcrq') . '</th>'
             . '<th>' . __('Uczeń', 'wcrq') . '</th>'
             . '<th>' . __('Klasa', 'wcrq') . '</th>'
             . '<th>' . __('Email', 'wcrq') . '</th>'
@@ -1083,6 +1090,7 @@ function wcrq_registrations_page_html() {
             $actions[] = '<a href="' . esc_url(add_query_arg(['wcrq_action' => 'delete', 'id' => $r->id, '_wpnonce' => $nonce])) . '" onclick="return confirm(\'Usunąć?\');">' . __('USUŃ', 'wcrq') . '</a>';
             echo '<tr>'
                 . '<td>' . esc_html($r->school) . '</td>'
+                . '<td>' . esc_html($r->gmina) . '</td>'
                 . '<td>' . esc_html($r->name) . '</td>'
                 . '<td>' . esc_html($r->class) . '</td>'
                 . '<td>' . esc_html($r->email) . '</td>'
@@ -1264,6 +1272,7 @@ function wcrq_results_page_html() {
             . '<th>' . esc_html__('Uczeń', 'wcrq') . '</th>'
             . '<th>' . esc_html__('Email', 'wcrq') . '</th>'
             . '<th>' . esc_html__('Szkoła', 'wcrq') . '</th>'
+            . '<th>' . esc_html__('Gmina', 'wcrq') . '</th>'
             . '<th>' . esc_html__('Klasa', 'wcrq') . '</th>'
             . '<th>' . esc_html__('Wynik', 'wcrq') . '</th>'
             . '<th>' . esc_html__('Czas', 'wcrq') . '</th>'
@@ -1284,6 +1293,7 @@ function wcrq_results_page_html() {
                 . '<td>' . esc_html($r->name) . '</td>'
                 . '<td>' . esc_html($r->email) . '</td>'
                 . '<td>' . esc_html($r->school) . '</td>'
+                . '<td>' . esc_html($r->gmina) . '</td>'
                 . '<td>' . esc_html($r->class) . '</td>'
                 . '<td>' . esc_html(number_format_i18n($r->score, 2)) . '%</td>'
                 . '<td>' . esc_html($duration) . '</td>'
@@ -1411,16 +1421,18 @@ function wcrq_registration_shortcode() {
     if (!empty($_POST['wcrq_reg_nonce']) && wp_verify_nonce($_POST['wcrq_reg_nonce'], 'wcrq_reg')) {
         $raw_school = $_POST['wcrq_school'] ?? '';
         $raw_name = $_POST['wcrq_name'] ?? '';
+        $raw_gmina = $_POST['wcrq_gmina'] ?? '';
         $raw_class = $_POST['wcrq_class'] ?? '';
         $raw_email = $_POST['wcrq_email'] ?? '';
         $pattern = '/<[^>]*>|(SELECT|INSERT|DELETE|UPDATE|DROP|UNION|--)/i';
-        if (preg_match($pattern, $raw_school . $raw_name . $raw_class . $raw_email)) {
+        if (preg_match($pattern, $raw_school . $raw_name . $raw_class . $raw_email . $raw_gmina)) {
             $output .= '<p>nie mozna psuć</p>';
         } else {
             global $wpdb;
             $table = $wpdb->prefix . 'wcrq_participants';
             $school = sanitize_text_field($raw_school);
             $name = sanitize_text_field($raw_name);
+            $gmina = sanitize_text_field($raw_gmina);
             $class = sanitize_text_field($raw_class);
             $email = sanitize_email($raw_email);
             $errors = [];
@@ -1430,13 +1442,16 @@ function wcrq_registration_shortcode() {
             if (mb_strlen($name) > 100) {
                 $errors[] = __('Imię i nazwisko jest zbyt długie.', 'wcrq');
             }
+            if (mb_strlen($gmina) > 255) {
+                $errors[] = __('Nazwa gminy jest zbyt długa.', 'wcrq');
+            }
             if (mb_strlen($class) > 50) {
                 $errors[] = __('Klasa jest zbyt długa.', 'wcrq');
             }
             if (mb_strlen($email) > 100) {
                 $errors[] = __('Email jest zbyt długi.', 'wcrq');
             }
-            if ($school && $name && $class && $email && empty($errors)) {
+            if ($school && $name && $gmina && $class && $email && empty($errors)) {
                 $email_exists = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table WHERE email = %s", $email));
                 if ($email_exists) {
                     $output .= '<p>' . __('Ten e-mail został już wykorzystany do rejestracji.', 'wcrq') . '</p>';
@@ -1447,11 +1462,12 @@ function wcrq_registration_shortcode() {
                         $exists = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $table WHERE login = %s", $login));
                     } while ($exists);
                     $password = wp_generate_password(8, false);
-                    $inserted = $wpdb->insert($table, [
-                        'school' => $school,
-                        'name' => $name,
-                        'class' => $class,
-                        'email' => $email,
+                        $inserted = $wpdb->insert($table, [
+                            'school' => $school,
+                            'gmina' => $gmina,
+                            'name' => $name,
+                            'class' => $class,
+                            'email' => $email,
                         'login' => $login,
                         'password' => wp_hash_password($password),
                         'pass_plain' => $password,
@@ -1486,6 +1502,7 @@ function wcrq_registration_shortcode() {
     $output .= '<form method="post" class="wcrq-registration">'
         . wp_nonce_field('wcrq_reg', 'wcrq_reg_nonce', true, false)
         . '<p><label>' . __('Nazwa szkoły', 'wcrq') . '<br /><input type="text" name="wcrq_school" required maxlength="150"></label></p>'
+        . '<p><label>' . __('Gmina', 'wcrq') . '<br /><input type="text" name="wcrq_gmina" required maxlength="255"></label></p>'
         . '<p><label>' . __('Imię i nazwisko', 'wcrq') . '<br /><input type="text" name="wcrq_name" required maxlength="100"></label></p>'
         . '<p><label>' . __('Klasa', 'wcrq') . '<br /><input type="text" name="wcrq_class" required maxlength="50"></label></p>'
         . '<p><label>Email<br /><input type="email" name="wcrq_email" required maxlength="100"></label></p>'
@@ -1495,6 +1512,13 @@ function wcrq_registration_shortcode() {
     return $output;
 }
 add_shortcode('wcr_registration', 'wcrq_registration_shortcode');
+
+function wcrq_enqueue_login_state_script($is_logged_in) {
+    wp_enqueue_script('wcrq-login-state', plugins_url('assets/js/login-state.js', __FILE__), [], '0.1', true);
+    wp_localize_script('wcrq-login-state', 'wcrqLoginState', [
+        'isLogged' => $is_logged_in ? 1 : 0,
+    ]);
+}
 
 // Quiz shortcode
 function wcrq_quiz_shortcode() {
@@ -1517,13 +1541,85 @@ function wcrq_quiz_shortcode() {
         return '<div class="wcrq-pre-quiz">' . $text . '</div>';
     }
 
-    $remaining = $end_time ? max(0, $end_time - $now) : 0;
+    $allow_navigation = !empty($options['allow_navigation']);
+    $show_violations_to_users = !empty($options['show_violations_to_users']);
 
-    // Check login
-    $participant = wcrq_require_active_participant();
-    if (is_wp_error($participant)) {
-        return wcrq_login_form($participant->get_error_message());
+    $participant_result = wcrq_require_active_participant();
+    $participant_error = null;
+    if (is_wp_error($participant_result)) {
+        $participant_error = $participant_result;
+        $participant = null;
+    } else {
+        $participant = $participant_result;
     }
+
+    wcrq_enqueue_login_state_script(!empty($participant));
+
+    $pending_start = !empty($_SESSION['wcrq_pending_start']);
+
+    if ($participant && $pending_start && empty($_SESSION['wcrq_started'])) {
+        $_SESSION['wcrq_started'] = wcrq_current_timestamp();
+        unset($_SESSION['wcrq_pending_start']);
+    }
+
+    if (empty($_SESSION['wcrq_started'])) {
+        $should_show_login = false;
+        $login_message = '';
+        $login_message_type = '';
+
+        if (!empty($_POST['wcrq_start'])) {
+            if ($participant) {
+                $_SESSION['wcrq_started'] = wcrq_current_timestamp();
+                unset($_SESSION['wcrq_pending_start']);
+            } else {
+                $_SESSION['wcrq_pending_start'] = 1;
+                $should_show_login = true;
+                $login_message_type = 'prompt';
+            }
+        } elseif ($participant_error && $participant_error->get_error_code() === 'session_conflict') {
+            $_SESSION['wcrq_pending_start'] = 1;
+            $should_show_login = true;
+            $login_message = $participant_error->get_error_message();
+            $login_message_type = 'session_conflict';
+        } elseif ($pending_start && !$participant) {
+            $should_show_login = true;
+            $login_message_type = 'prompt';
+        }
+
+        if (empty($_SESSION['wcrq_started'])) {
+            $pre_quiz_sections = wcrq_render_pre_quiz_sections($options, $participant, $allow_navigation, $show_violations_to_users);
+            if ($should_show_login && !$login_message && $login_message_type === 'prompt') {
+                $login_message = __('Zaloguj się, aby rozpocząć quiz.', 'wcrq');
+            }
+
+            $wrapper_attrs = ' class="wcrq-pre-quiz" data-wcrq-logged-in="' . ($participant ? '1' : '0') . '"';
+            $html = '<div' . $wrapper_attrs . '>' . $pre_quiz_sections . '<form method="post" class="wcrq-start"><p><button type="submit" name="wcrq_start" value="1">' . __('Rozpocznij quiz', 'wcrq') . '</button></p></form>';
+            if ($should_show_login) {
+                $message_type_attr = '';
+                if ($login_message_type === 'session_conflict') {
+                    $message_type_attr = 'conflict';
+                } elseif ($login_message_type === 'prompt') {
+                    $message_type_attr = 'prompt';
+                } elseif ($participant_error) {
+                    $message_type_attr = $participant_error->get_error_code();
+                }
+                $html .= wcrq_login_form($login_message, $message_type_attr);
+            }
+            $html .= '</div>';
+
+            return $html;
+        }
+    }
+
+    if (!$participant) {
+        if ($participant_error) {
+            $message_type = $participant_error->get_error_code() === 'session_conflict' ? 'conflict' : $participant_error->get_error_code();
+            return wcrq_login_form($participant_error->get_error_message(), $message_type);
+        }
+
+        return wcrq_login_form('', 'prompt');
+    }
+
     global $wpdb;
     if (!empty($participant->blocked)) {
         wcrq_clear_participant_session(intval($participant->id));
@@ -1552,46 +1648,6 @@ function wcrq_quiz_shortcode() {
     $saved_responses = [];
     if (!empty($_SESSION['wcrq_saved_responses']) && is_array($_SESSION['wcrq_saved_responses'])) {
         $saved_responses = array_map('intval', $_SESSION['wcrq_saved_responses']);
-    }
-
-    $allow_navigation = !empty($options['allow_navigation']);
-    $show_violations_to_users = !empty($options['show_violations_to_users']);
-
-    // Check if quiz started
-    if (empty($_SESSION['wcrq_started'])) {
-        if (!empty($_POST['wcrq_start'])) {
-            $_SESSION['wcrq_started'] = wcrq_current_timestamp();
-        } else {
-            $pre_quiz = !empty($options['pre_quiz_text']) ? wpautop(wp_kses_post($options['pre_quiz_text'])) : '';
-            $sections = '';
-            $sections .= '<div class="wcrq-pre-quiz-section">';
-            $sections .= '<p class="wcrq-pre-quiz-welcome">' . sprintf(esc_html__('Witaj %s!', 'wcrq'), esc_html($participant->name)) . '</p>';
-            if ($pre_quiz) {
-                $sections .= '<div class="wcrq-pre-quiz-text">' . $pre_quiz . '</div>';
-            }
-            $rules = [];
-            if ($show_violations_to_users) {
-                $rules[] = esc_html__('Opuszczanie quizu w trakcie jego trwania jest zabronione. Każde naruszenie zostanie zapisane, a wyjście ze strony quizu zostanie odnotowane jako naruszenie.', 'wcrq');
-            }
-            if ($allow_navigation) {
-                $rules[] = esc_html__('Możesz wracać do poprzednich pytań w dowolnym momencie rozwiązywania quizu.', 'wcrq');
-            } else {
-                $rules[] = esc_html__('Nie można wracać do poprzednich pytań podczas rozwiązywania quizu.', 'wcrq');
-            }
-            if ($rules) {
-                $sections .= '<div class="wcrq-pre-quiz-rules-block">';
-                $sections .= '<h3 class="wcrq-pre-quiz-rules-title">' . esc_html__('Zasady podczas quizu:', 'wcrq') . '</h3>';
-                $sections .= '<ul class="wcrq-pre-quiz-rules">';
-                foreach ($rules as $rule) {
-                    $sections .= '<li>' . $rule . '</li>';
-                }
-                $sections .= '</ul>';
-                $sections .= '</div>';
-            }
-            $sections .= '</div>';
-
-            return '<div class="wcrq-pre-quiz">' . $sections . '<form method="post" class="wcrq-start"><p><button type="submit" name="wcrq_start" value="1">' . __('Rozpocznij quiz', 'wcrq') . '</button></p></form></div>';
-        }
     }
 
     // Handle submission
@@ -1738,13 +1794,54 @@ function wcrq_quiz_shortcode() {
 }
 add_shortcode('wcr_quiz', 'wcrq_quiz_shortcode');
 
-function wcrq_set_login_message($message) {
+function wcrq_render_pre_quiz_sections($options, $participant, $allow_navigation, $show_violations_to_users) {
+    $sections = '<div class="wcrq-pre-quiz-section">';
+
+    if (!empty($participant) && !empty($participant->name)) {
+        $sections .= '<p class="wcrq-pre-quiz-welcome">' . sprintf(esc_html__('Witaj %s!', 'wcrq'), esc_html($participant->name)) . '</p>';
+    }
+
+    $pre_quiz = !empty($options['pre_quiz_text']) ? wpautop(wp_kses_post($options['pre_quiz_text'])) : '';
+    if ($pre_quiz) {
+        $sections .= '<div class="wcrq-pre-quiz-text">' . $pre_quiz . '</div>';
+    }
+
+    $rules = [];
+    if ($show_violations_to_users) {
+        $rules[] = esc_html__('Opuszczanie quizu w trakcie jego trwania jest zabronione. Każde naruszenie zostanie zapisane, a wyjście ze strony quizu zostanie odnotowane jako naruszenie.', 'wcrq');
+    }
+    if ($allow_navigation) {
+        $rules[] = esc_html__('Możesz wracać do poprzednich pytań w dowolnym momencie rozwiązywania quizu.', 'wcrq');
+    } else {
+        $rules[] = esc_html__('Nie można wracać do poprzednich pytań podczas rozwiązywania quizu.', 'wcrq');
+    }
+
+    if ($rules) {
+        $sections .= '<div class="wcrq-pre-quiz-rules-block">';
+        $sections .= '<h3 class="wcrq-pre-quiz-rules-title">' . esc_html__('Zasady podczas quizu:', 'wcrq') . '</h3>';
+        $sections .= '<ul class="wcrq-pre-quiz-rules">';
+        foreach ($rules as $rule) {
+            $sections .= '<li>' . $rule . '</li>';
+        }
+        $sections .= '</ul>';
+        $sections .= '</div>';
+    }
+
+    $sections .= '</div>';
+
+    return $sections;
+}
+
+function wcrq_set_login_message($message, $type = '') {
     if (!session_id()) {
         return;
     }
 
     if ($message) {
-        $_SESSION['wcrq_login_message'] = (string) $message;
+        $_SESSION['wcrq_login_message'] = [
+            'text' => (string) $message,
+            'type' => (string) $type,
+        ];
     } else {
         unset($_SESSION['wcrq_login_message']);
     }
@@ -1752,24 +1849,34 @@ function wcrq_set_login_message($message) {
 
 function wcrq_take_login_message() {
     if (!session_id() || empty($_SESSION['wcrq_login_message'])) {
-        return '';
+        return ['', ''];
     }
 
-    $message = (string) $_SESSION['wcrq_login_message'];
+    $stored = $_SESSION['wcrq_login_message'];
     unset($_SESSION['wcrq_login_message']);
 
-    return $message;
+    if (is_array($stored)) {
+        $text = isset($stored['text']) ? (string) $stored['text'] : '';
+        $type = isset($stored['type']) ? (string) $stored['type'] : '';
+        return [$text, $type];
+    }
+
+    return [(string) $stored, ''];
 }
 
-function wcrq_login_form($message = '') {
-    $stored_message = wcrq_take_login_message();
+function wcrq_login_form($message = '', $message_type = '') {
+    list($stored_message, $stored_type) = wcrq_take_login_message();
     if ($stored_message !== '') {
         $message = $stored_message;
+        if ($stored_type !== '') {
+            $message_type = $stored_type;
+        }
     }
 
     $out = '<form method="post" class="wcrq-login" autocomplete="off">';
-    if ($message) {
-        $out .= '<p class="wcrq-login-message" role="alert">' . esc_html($message) . '</p>';
+    if ($message && $message_type !== 'prompt') {
+        $type_attr = $message_type ? ' data-message-type="' . esc_attr($message_type) . '"' : '';
+        $out .= '<p class="wcrq-login-message" role="alert"' . $type_attr . '>' . esc_html($message) . '</p>';
     }
     $out .= '<p><label>Login<br /><input type="text" name="wcrq_login" required autocomplete="off" autocapitalize="none" autocorrect="off"></label></p>'
         . '<p><label>' . __('Hasło', 'wcrq') . '<br /><input type="password" name="wcrq_pass" required autocomplete="off"></label></p>'
@@ -1787,7 +1894,7 @@ function wcrq_quiz_shortcode_process_login() {
         $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE login = %s", $login));
         if ($row && wp_check_password($pass, $row->password)) {
             if ($row->blocked) {
-                wcrq_set_login_message(__('Twoje konto zostało zablokowane.', 'wcrq'));
+                wcrq_set_login_message(__('Twoje konto zostało zablokowane.', 'wcrq'), 'error');
                 return false;
             }
             if (session_status() === PHP_SESSION_ACTIVE) {
@@ -1802,7 +1909,7 @@ function wcrq_quiz_shortcode_process_login() {
             wcrq_set_login_message('');
             return true;
         } else {
-            wcrq_set_login_message(__('Nieprawidłowy login lub hasło.', 'wcrq'));
+            wcrq_set_login_message(__('Nieprawidłowy login lub hasło.', 'wcrq'), 'error');
             return false;
         }
     }
@@ -2122,7 +2229,7 @@ function wcrq_get_results_rows() {
     $pt = $wpdb->prefix . 'wcrq_participants';
     $rt = $wpdb->prefix . 'wcrq_results';
 
-    return $wpdb->get_results("SELECT r.*, p.name, p.email, p.class, p.school FROM $rt r JOIN $pt p ON r.participant_id = p.id ORDER BY r.score DESC, r.duration_seconds ASC, r.end_time DESC");
+    return $wpdb->get_results("SELECT r.*, p.name, p.email, p.class, p.school, p.gmina FROM $rt r JOIN $pt p ON r.participant_id = p.id ORDER BY r.score DESC, r.duration_seconds ASC, r.end_time DESC");
 }
 
 function wcrq_export_results_csv($rows) {
@@ -2135,6 +2242,7 @@ function wcrq_export_results_csv($rows) {
         __('Imię i nazwisko', 'wcrq'),
         __('Email', 'wcrq'),
         __('Szkoła', 'wcrq'),
+        __('Gmina', 'wcrq'),
         __('Klasa', 'wcrq'),
         __('Wynik (%)', 'wcrq'),
         __('Czas (HH:MM:SS)', 'wcrq'),
@@ -2162,6 +2270,7 @@ function wcrq_export_results_csv($rows) {
             $row->name,
             $row->email,
             $row->school,
+            $row->gmina,
             $row->class,
             number_format_i18n($row->score, 2),
             wcrq_format_duration($duration_seconds),
@@ -2203,6 +2312,7 @@ function wcrq_export_results_excel($rows) {
         __('Imię i nazwisko', 'wcrq'),
         __('Email', 'wcrq'),
         __('Szkoła', 'wcrq'),
+        __('Gmina', 'wcrq'),
         __('Klasa', 'wcrq'),
         __('Wynik (%)', 'wcrq'),
         __('Czas (HH:MM:SS)', 'wcrq'),
@@ -2235,14 +2345,15 @@ function wcrq_export_results_excel($rows) {
         $sheet->setCellValueByColumnAndRow(1, $rowNumber, $row->name);
         $sheet->setCellValueByColumnAndRow(2, $rowNumber, $row->email);
         $sheet->setCellValueByColumnAndRow(3, $rowNumber, $row->school);
-        $sheet->setCellValueByColumnAndRow(4, $rowNumber, $row->class);
-        $sheet->setCellValueByColumnAndRow(5, $rowNumber, number_format_i18n($row->score, 2));
-        $sheet->setCellValueByColumnAndRow(6, $rowNumber, wcrq_format_duration($duration_seconds));
-        $sheet->setCellValueByColumnAndRow(7, $rowNumber, intval($row->violations));
-        $sheet->setCellValueByColumnAndRow(8, $rowNumber, $row->is_completed ? __('Tak', 'wcrq') : __('Nie', 'wcrq'));
-        $sheet->setCellValueByColumnAndRow(9, $rowNumber, $row->start_time);
-        $sheet->setCellValueByColumnAndRow(10, $rowNumber, $row->end_time);
-        $sheet->setCellValueByColumnAndRow(11, $rowNumber, implode("\n", $detail_strings));
+        $sheet->setCellValueByColumnAndRow(4, $rowNumber, $row->gmina);
+        $sheet->setCellValueByColumnAndRow(5, $rowNumber, $row->class);
+        $sheet->setCellValueByColumnAndRow(6, $rowNumber, number_format_i18n($row->score, 2));
+        $sheet->setCellValueByColumnAndRow(7, $rowNumber, wcrq_format_duration($duration_seconds));
+        $sheet->setCellValueByColumnAndRow(8, $rowNumber, intval($row->violations));
+        $sheet->setCellValueByColumnAndRow(9, $rowNumber, $row->is_completed ? __('Tak', 'wcrq') : __('Nie', 'wcrq'));
+        $sheet->setCellValueByColumnAndRow(10, $rowNumber, $row->start_time);
+        $sheet->setCellValueByColumnAndRow(11, $rowNumber, $row->end_time);
+        $sheet->setCellValueByColumnAndRow(12, $rowNumber, implode("\n", $detail_strings));
 
         $rowNumber++;
     }
