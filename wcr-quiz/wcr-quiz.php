@@ -1527,6 +1527,11 @@ function wcrq_quiz_shortcode() {
     $end_time = !empty($options['end_time']) ? wcrq_parse_datetime_local($options['end_time']) : 0;
     $now = wcrq_current_timestamp();
 
+    $completion_message = wcrq_take_completion_message();
+    if ($completion_message !== '') {
+        return $completion_message;
+    }
+
     if ($start_time && $now < $start_time) {
         wp_enqueue_script('wcrq-countdown', plugins_url('assets/js/countdown.js', __FILE__), [], '0.1', true);
         $text = !empty($options['pre_start_text']) ? wpautop(wp_kses_post($options['pre_start_text'])) : '<p>' . esc_html__('Quiz jeszcze się nie rozpoczął.', 'wcrq') . '</p>';
@@ -1864,6 +1869,29 @@ function wcrq_take_login_message() {
     return [(string) $stored, ''];
 }
 
+function wcrq_set_completion_message($message) {
+    if (!session_id()) {
+        return;
+    }
+
+    if ($message) {
+        $_SESSION['wcrq_completion_message'] = (string) $message;
+    } else {
+        unset($_SESSION['wcrq_completion_message']);
+    }
+}
+
+function wcrq_take_completion_message() {
+    if (!session_id() || empty($_SESSION['wcrq_completion_message'])) {
+        return '';
+    }
+
+    $message = (string) $_SESSION['wcrq_completion_message'];
+    unset($_SESSION['wcrq_completion_message']);
+
+    return $message;
+}
+
 function wcrq_login_form($message = '', $message_type = '') {
     list($stored_message, $stored_type) = wcrq_take_login_message();
     if ($stored_message !== '') {
@@ -2025,7 +2053,10 @@ function wcrq_handle_quiz_submit() {
 
     wcrq_clear_participant_session($participant_id);
 
-    return wcrq_build_completion_message($score);
+    $completion_markup = '<div class="wcrq-quiz-completed">' . wcrq_build_completion_message($score) . '</div>';
+    wcrq_set_completion_message($completion_markup);
+
+    return $completion_markup;
 }
 
 function wcrq_ajax_check_session() {
