@@ -1882,14 +1882,21 @@ function wcrq_set_completion_message($message) {
 }
 
 function wcrq_take_completion_message() {
-    if (!session_id() || empty($_SESSION['wcrq_completion_message'])) {
-        return '';
+    static $cached_message;
+
+    if ($cached_message !== null) {
+        return $cached_message;
     }
 
-    $message = (string) $_SESSION['wcrq_completion_message'];
+    if (!session_id() || empty($_SESSION['wcrq_completion_message'])) {
+        $cached_message = '';
+        return $cached_message;
+    }
+
+    $cached_message = (string) $_SESSION['wcrq_completion_message'];
     unset($_SESSION['wcrq_completion_message']);
 
-    return $message;
+    return $cached_message;
 }
 
 function wcrq_login_form($message = '', $message_type = '') {
