@@ -1049,6 +1049,23 @@ function wcrq_settings_page_html() {
     ?>
     <div class="wrap">
         <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
+        <?php
+        $mail_error = get_transient('wcrq_last_mail_error');
+        if (is_array($mail_error) && !empty($mail_error['message'])) {
+            $error_time = !empty($mail_error['time']) ? intval($mail_error['time']) : 0;
+            $error_time_formatted = $error_time ? wcrq_format_polish_datetime($error_time) : '';
+            echo '<div class="notice notice-error">';
+            echo '<p><strong>' . esc_html__('Ostatnia próba wysyłki e-mail nie powiodła się.', 'wcrq') . '</strong></p>';
+            if ($error_time_formatted !== '') {
+                echo '<p>' . esc_html(sprintf(__('Czas błędu: %s', 'wcrq'), $error_time_formatted)) . '</p>';
+            }
+            echo '<p>' . esc_html($mail_error['message']) . '</p>';
+            if (!empty($mail_error['details'])) {
+                echo '<pre style="white-space:pre-wrap;">' . esc_html($mail_error['details']) . '</pre>';
+            }
+            echo '</div>';
+        }
+        ?>
         <form action="options.php" method="post">
             <?php
             settings_fields('wcrq_settings');
