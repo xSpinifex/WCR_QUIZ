@@ -360,6 +360,9 @@ function wcrq_get_mail_sender_settings() {
         }
     }
 
+    $original_from_email = $from_email;
+    $restricted_sender = $from_email !== '' && wcrq_is_restricted_sender_email($from_email);
+
     $admin_email = get_option('admin_email');
     if (!is_email($admin_email)) {
         $admin_email = '';
@@ -374,12 +377,26 @@ function wcrq_get_mail_sender_settings() {
     }
 
     $fallback_from_email = wcrq_get_default_sender_email_address();
-    if ($from_email === '' || wcrq_is_restricted_sender_email($from_email)) {
+    if ($from_email === '' || $restricted_sender) {
+        if ($restricted_sender && $original_from_email !== '') {
+            $expiration = defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400;
+            set_transient('wcrq_sender_warning', [
+                'time' => time(),
+                'message' => sprintf(
+                    __('Adres nadawcy %1$s należy do domeny, która blokuje wysyłkę z serwerów zewnętrznych (np. Gmail). Wiadomość została wysłana z adresu technicznego %2$s. Skonfiguruj adres e-mail w swojej domenie w ustawieniach wtyczki.', 'wcrq'),
+                    $original_from_email,
+                    $fallback_from_email
+                ),
+            ], $expiration);
+        }
+
         $from_email = $fallback_from_email;
 
         if ($reply_to === '' && $admin_email !== '') {
             $reply_to = $admin_email;
         }
+    } else {
+        delete_transient('wcrq_sender_warning');
     }
 
     return [
@@ -408,6 +425,31 @@ function wcrq_prepare_email_headers() {
 
     return $headers;
 }
+
+function wcrq_store_mail_failure($wp_error) {
+    if (!($wp_error instanceof WP_Error)) {
+        return;
+    }
+
+    $expiration = defined('DAY_IN_SECONDS') ? DAY_IN_SECONDS : 86400;
+
+    $message = $wp_error->get_error_message();
+    $details = '';
+    $error_data = $wp_error->get_error_data();
+
+    if (is_string($error_data)) {
+        $details = $error_data;
+    } elseif (is_array($error_data) && !empty($error_data)) {
+        $details = wp_json_encode($error_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    }
+
+    set_transient('wcrq_last_mail_error', [
+        'time' => time(),
+        'message' => $message,
+        'details' => $details,
+    ], $expiration);
+}
+add_action('wp_mail_failed', 'wcrq_store_mail_failure');
 
 function wcrq_admin_menu() {
     add_menu_page('WCR Quiz', 'WCR Quiz', 'manage_options', 'wcrq', 'wcrq_settings_page_html', 'dashicons-welcome-learn-more', 20);
@@ -1119,6 +1161,17 @@ function wcrq_settings_page_html() {
     <div class="wrap">
         <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
         <?php
+        $sender_warning = get_transient('wcrq_sender_warning');
+        if (is_array($sender_warning) && !empty($sender_warning['message'])) {
+            $warning_time = !empty($sender_warning['time']) ? intval($sender_warning['time']) : 0;
+            $warning_time_formatted = $warning_time ? wcrq_format_polish_datetime($warning_time) : '';
+            echo '<div class="notice notice-warning">';
+            if ($warning_time_formatted !== '') {
+                echo '<p><strong>' . esc_html(sprintf(__('Ostatnie ostrzeżenie ( %s )', 'wcrq'), $warning_time_formatted)) . '</strong></p>';
+            }
+            echo '<p>' . esc_html($sender_warning['message']) . '</p>';
+            echo '</div>';
+        }
         $mail_error = get_transient('wcrq_last_mail_error');
         if (is_array($mail_error) && !empty($mail_error['message'])) {
             $error_time = !empty($mail_error['time']) ? intval($mail_error['time']) : 0;
@@ -1663,6 +1716,7 @@ function wcrq_registration_shortcode() {
                         $sent = wp_mail($email, $subject, $body, $headers);
 
                         if ($sent) {
+                            delete_transient('wcrq_last_mail_error');
                             $output .= '<p>' . __('Rejestracja zakończona sukcesem. Sprawdź e-mail.', 'wcrq') . '</p>';
                         } else {
                             $output .= '<p>' . __('Rejestracja zakończona sukcesem, ale nie udało się wysłać wiadomości e-mail. Skontaktuj się z organizatorami, aby otrzymać dane logowania.', 'wcrq') . '</p>';
