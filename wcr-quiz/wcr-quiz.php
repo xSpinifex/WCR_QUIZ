@@ -252,13 +252,6 @@ function wcrq_register_settings() {
     add_settings_field('mail_from_name', __('Nazwa nadawcy wiadomości e-mail', 'wcrq'), 'wcrq_field_mail_from_name', 'wcrq', 'wcrq_main');
     add_settings_field('mail_from_email', __('Adres e-mail nadawcy', 'wcrq'), 'wcrq_field_mail_from_email', 'wcrq', 'wcrq_main');
     add_settings_field('mail_reply_to', __('Adres odpowiedzi (Reply-To)', 'wcrq'), 'wcrq_field_mail_reply_to', 'wcrq', 'wcrq_main');
-    add_settings_field('smtp_enabled', __('Wysyłka przez SMTP', 'wcrq'), 'wcrq_field_smtp_enabled', 'wcrq', 'wcrq_main');
-    add_settings_field('smtp_host', __('Serwer SMTP', 'wcrq'), 'wcrq_field_smtp_host', 'wcrq', 'wcrq_main');
-    add_settings_field('smtp_port', __('Port SMTP', 'wcrq'), 'wcrq_field_smtp_port', 'wcrq', 'wcrq_main');
-    add_settings_field('smtp_encryption', __('Szyfrowanie SMTP', 'wcrq'), 'wcrq_field_smtp_encryption', 'wcrq', 'wcrq_main');
-    add_settings_field('smtp_auth', __('Uwierzytelnianie SMTP', 'wcrq'), 'wcrq_field_smtp_auth', 'wcrq', 'wcrq_main');
-    add_settings_field('smtp_username', __('Login SMTP', 'wcrq'), 'wcrq_field_smtp_username', 'wcrq', 'wcrq_main');
-    add_settings_field('smtp_password', __('Hasło SMTP', 'wcrq'), 'wcrq_field_smtp_password', 'wcrq', 'wcrq_main');
 }
 add_action('admin_init', 'wcrq_register_settings');
 
@@ -327,54 +320,6 @@ function wcrq_get_mail_sender_settings() {
     ];
 }
 
-function wcrq_get_smtp_settings() {
-    $options = get_option('wcrq_settings');
-
-    $enabled = is_array($options) && !empty($options['smtp_enabled']);
-    $host = '';
-    $port = 0;
-    $encryption = '';
-    $auth = false;
-    $username = '';
-    $password = '';
-
-    if ($enabled && is_array($options)) {
-        if (!empty($options['smtp_host'])) {
-            $host = (string) $options['smtp_host'];
-        }
-
-        if (!empty($options['smtp_port'])) {
-            $port = intval($options['smtp_port']);
-        }
-
-        if (!empty($options['smtp_encryption']) && in_array($options['smtp_encryption'], ['ssl', 'tls'], true)) {
-            $encryption = $options['smtp_encryption'];
-        }
-
-        if (!empty($options['smtp_auth'])) {
-            $auth = true;
-        }
-
-        if (!empty($options['smtp_username'])) {
-            $username = (string) $options['smtp_username'];
-        }
-
-        if (!empty($options['smtp_password'])) {
-            $password = (string) $options['smtp_password'];
-        }
-    }
-
-    return [
-        'enabled' => $enabled,
-        'host' => $host,
-        'port' => $port,
-        'encryption' => $encryption,
-        'auth' => $auth,
-        'username' => $username,
-        'password' => $password,
-    ];
-}
-
 function wcrq_prepare_email_headers() {
     $headers = ['Content-Type: text/html; charset=UTF-8'];
     $sender = wcrq_get_mail_sender_settings();
@@ -394,113 +339,6 @@ function wcrq_prepare_email_headers() {
 
     return $headers;
 }
-
-function wcrq_filter_mail_from_name($current) {
-    $sender = wcrq_get_mail_sender_settings();
-    $name = trim($sender['from_name']);
-
-    if ($name === '') {
-        return $current;
-    }
-
-    return $name;
-}
-add_filter('wp_mail_from_name', 'wcrq_filter_mail_from_name');
-
-function wcrq_filter_mail_from($current) {
-    $sender = wcrq_get_mail_sender_settings();
-    $email = $sender['from_email'];
-
-    if (!is_email($email)) {
-        return $current;
-    }
-
-    return $email;
-}
-add_filter('wp_mail_from', 'wcrq_filter_mail_from');
-
-function wcrq_configure_phpmailer($phpmailer) {
-    if (!is_object($phpmailer)) {
-        return;
-    }
-
-    $smtp = wcrq_get_smtp_settings();
-    $sender = wcrq_get_mail_sender_settings();
-
-    if (!empty($sender['from_email'])) {
-        try {
-            $phpmailer->setFrom($sender['from_email'], $sender['from_name'], false);
-        } catch (\Exception $e) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch
-            // Ignored. If PHPMailer rejects the address we fall back to defaults set by wp_mail.
-        }
-        if (empty($phpmailer->Sender)) {
-            $phpmailer->Sender = $sender['from_email'];
-        }
-    }
-
-    if (!empty($sender['reply_to'])) {
-        try {
-            $phpmailer->clearReplyTos();
-            $phpmailer->addReplyTo($sender['reply_to']);
-        } catch (\Exception $e) { // phpcs:ignore Generic.CodeAnalysis.EmptyStatement.DetectedCatch
-            // Ignored.
-        }
-    }
-
-    if (empty($smtp['enabled']) || empty($smtp['host']) || empty($smtp['port'])) {
-        return;
-    }
-
-    $phpmailer->isSMTP();
-    $phpmailer->Host = $smtp['host'];
-    $phpmailer->Port = intval($smtp['port']);
-    $phpmailer->SMTPAuth = !empty($smtp['auth']);
-
-    if ($smtp['encryption'] === 'ssl' || $smtp['encryption'] === 'tls') {
-        $phpmailer->SMTPSecure = $smtp['encryption'];
-        $phpmailer->SMTPAutoTLS = ($smtp['encryption'] === 'tls');
-    } else {
-        $phpmailer->SMTPSecure = '';
-        $phpmailer->SMTPAutoTLS = false;
-    }
-
-    if (!empty($smtp['auth'])) {
-        $phpmailer->Username = $smtp['username'];
-        $phpmailer->Password = $smtp['password'];
-    }
-}
-add_action('phpmailer_init', 'wcrq_configure_phpmailer');
-
-function wcrq_capture_mail_failure($wp_error) {
-    if (!($wp_error instanceof WP_Error)) {
-        return;
-    }
-
-    $message = wp_strip_all_tags($wp_error->get_error_message());
-    $data = $wp_error->get_error_data();
-    $details = '';
-
-    if (is_array($data)) {
-        if (!empty($data['smtp_debug']) && is_string($data['smtp_debug'])) {
-            $details = wp_strip_all_tags($data['smtp_debug']);
-        } elseif (!empty($data['exception']) && $data['exception'] instanceof \Exception) {
-            $details = wp_strip_all_tags($data['exception']->getMessage());
-        }
-
-        if (is_string($details) && function_exists('mb_substr')) {
-            $details = mb_substr($details, 0, 2000);
-        } elseif (is_string($details)) {
-            $details = substr($details, 0, 2000);
-        }
-    }
-
-    set_transient('wcrq_last_mail_error', [
-        'message' => $message,
-        'details' => $details,
-        'time' => time(),
-    ], 12 * HOUR_IN_SECONDS);
-}
-add_action('wp_mail_failed', 'wcrq_capture_mail_failure');
 
 function wcrq_admin_menu() {
     add_menu_page('WCR Quiz', 'WCR Quiz', 'manage_options', 'wcrq', 'wcrq_settings_page_html', 'dashicons-welcome-learn-more', 20);
@@ -594,36 +432,6 @@ function wcrq_sanitize_settings($input) {
 
     $reply_to = isset($input['mail_reply_to']) ? sanitize_email(wp_unslash($input['mail_reply_to'])) : '';
     $output['mail_reply_to'] = $reply_to && is_email($reply_to) ? $reply_to : '';
-
-    $output['smtp_enabled'] = !empty($input['smtp_enabled']) ? 1 : 0;
-
-    $smtp_host = isset($input['smtp_host']) ? sanitize_text_field(wp_unslash($input['smtp_host'])) : '';
-    $smtp_host = trim($smtp_host);
-    $output['smtp_host'] = $smtp_host;
-
-    $smtp_port = isset($input['smtp_port']) ? intval($input['smtp_port']) : 0;
-    if ($smtp_port < 1 || $smtp_port > 65535) {
-        $smtp_port = 0;
-    }
-    $output['smtp_port'] = $smtp_port;
-
-    $smtp_encryption = isset($input['smtp_encryption']) ? sanitize_text_field(wp_unslash($input['smtp_encryption'])) : '';
-    $allowed_encryptions = ['', 'ssl', 'tls'];
-    if (!in_array($smtp_encryption, $allowed_encryptions, true)) {
-        $smtp_encryption = '';
-    }
-    $output['smtp_encryption'] = $smtp_encryption;
-
-    $output['smtp_auth'] = !empty($input['smtp_auth']) ? 1 : 0;
-
-    $smtp_username = isset($input['smtp_username']) ? sanitize_text_field(wp_unslash($input['smtp_username'])) : '';
-    $smtp_username = trim($smtp_username);
-    $smtp_password_raw = isset($input['smtp_password']) ? wp_unslash($input['smtp_password']) : '';
-    $smtp_password = is_string($smtp_password_raw) ? sanitize_text_field($smtp_password_raw) : '';
-    $smtp_password = trim($smtp_password);
-
-    $output['smtp_username'] = $smtp_username;
-    $output['smtp_password'] = $smtp_password;
 
     if (isset($input['questions'])) {
         $questions = $input['questions'];
@@ -1714,63 +1522,6 @@ function wcrq_field_mail_reply_to() {
     echo '<p class="description">' . esc_html__('Opcjonalny adres odpowiedzi (Reply-To). Pozwala odbiorcom łatwo odpisać na wiadomość.', 'wcrq') . '</p>';
 }
 
-function wcrq_field_smtp_enabled() {
-    $options = get_option('wcrq_settings');
-    $enabled = !empty($options['smtp_enabled']);
-    echo '<label><input type="checkbox" name="wcrq_settings[smtp_enabled]" value="1"' . checked(1, $enabled, false) . ' /> ' . esc_html__('Włącz wysyłkę przez zewnętrzny serwer SMTP.', 'wcrq') . '</label>';
-    echo '<p class="description">' . esc_html__('Po włączeniu wpisz dane serwera SMTP poniżej. Skorzystaj z danych dostawcy poczty (np. Gmail, hosting, SendGrid).', 'wcrq') . '</p>';
-}
-
-function wcrq_field_smtp_host() {
-    $options = get_option('wcrq_settings');
-    $value = isset($options['smtp_host']) ? $options['smtp_host'] : '';
-    echo '<input type="text" name="wcrq_settings[smtp_host]" value="' . esc_attr($value) . '" class="regular-text" />';
-    echo '<p class="description">' . esc_html__('Adres serwera SMTP (np. smtp.gmail.com).', 'wcrq') . '</p>';
-}
-
-function wcrq_field_smtp_port() {
-    $options = get_option('wcrq_settings');
-    $value = isset($options['smtp_port']) ? intval($options['smtp_port']) : '';
-    echo '<input type="number" name="wcrq_settings[smtp_port]" value="' . esc_attr($value) . '" class="small-text" min="0" max="65535" />';
-    echo '<p class="description">' . esc_html__('Typowe porty: 587 (TLS), 465 (SSL) lub 25 (bez szyfrowania).', 'wcrq') . '</p>';
-}
-
-function wcrq_field_smtp_encryption() {
-    $options = get_option('wcrq_settings');
-    $value = isset($options['smtp_encryption']) ? $options['smtp_encryption'] : '';
-    $choices = [
-        '' => esc_html__('Brak', 'wcrq'),
-        'ssl' => 'SSL',
-        'tls' => 'TLS',
-    ];
-    echo '<select name="wcrq_settings[smtp_encryption]">';
-    foreach ($choices as $key => $label) {
-        echo '<option value="' . esc_attr($key) . '"' . selected($value, $key, false) . '>' . esc_html($label) . '</option>';
-    }
-    echo '</select>';
-    echo '<p class="description">' . esc_html__('Wybierz rodzaj szyfrowania wymagany przez serwer SMTP.', 'wcrq') . '</p>';
-}
-
-function wcrq_field_smtp_auth() {
-    $options = get_option('wcrq_settings');
-    $value = !empty($options['smtp_auth']);
-    echo '<label><input type="checkbox" name="wcrq_settings[smtp_auth]" value="1"' . checked(1, $value, false) . ' /> ' . esc_html__('Serwer SMTP wymaga logowania (SMTP Auth).', 'wcrq') . '</label>';
-}
-
-function wcrq_field_smtp_username() {
-    $options = get_option('wcrq_settings');
-    $value = isset($options['smtp_username']) ? $options['smtp_username'] : '';
-    echo '<input type="text" name="wcrq_settings[smtp_username]" value="' . esc_attr($value) . '" class="regular-text" autocomplete="off" />';
-    echo '<p class="description">' . esc_html__('Pełna nazwa użytkownika/konto do logowania w SMTP.', 'wcrq') . '</p>';
-}
-
-function wcrq_field_smtp_password() {
-    $options = get_option('wcrq_settings');
-    $value = isset($options['smtp_password']) ? $options['smtp_password'] : '';
-    echo '<input type="password" name="wcrq_settings[smtp_password]" value="' . esc_attr($value) . '" class="regular-text" autocomplete="off" />';
-    echo '<p class="description">' . esc_html__('Hasło lub hasło aplikacji do serwera SMTP. Zadbaj o jego bezpieczeństwo.', 'wcrq') . '</p>';
-}
-
 // Registration shortcode
 function wcrq_registration_shortcode() {
     $output = '';
@@ -1843,7 +1594,6 @@ function wcrq_registration_shortcode() {
                         $sent = wp_mail($email, $subject, $body, $headers);
 
                         if ($sent) {
-                            delete_transient('wcrq_last_mail_error');
                             $output .= '<p>' . __('Rejestracja zakończona sukcesem. Sprawdź e-mail.', 'wcrq') . '</p>';
                         } else {
                             $output .= '<p>' . __('Rejestracja zakończona sukcesem, ale nie udało się wysłać wiadomości e-mail. Skontaktuj się z organizatorami, aby otrzymać dane logowania.', 'wcrq') . '</p>';
