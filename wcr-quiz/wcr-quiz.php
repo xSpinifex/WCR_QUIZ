@@ -249,6 +249,9 @@ function wcrq_register_settings() {
     add_settings_field('allow_navigation', __('Zezwól na cofanie pytań', 'wcrq'), 'wcrq_field_allow_navigation', 'wcrq', 'wcrq_main');
     add_settings_field('show_results', __('Pokaż wynik użytkownikowi', 'wcrq'), 'wcrq_field_show_results', 'wcrq', 'wcrq_main');
     add_settings_field('show_violations_to_users', __('Pokazuj naruszenia uczestnikom', 'wcrq'), 'wcrq_field_show_violations_to_users', 'wcrq', 'wcrq_main');
+    add_settings_field('mail_from_name', __('Nazwa nadawcy wiadomości e-mail', 'wcrq'), 'wcrq_field_mail_from_name', 'wcrq', 'wcrq_main');
+    add_settings_field('mail_from_email', __('Adres e-mail nadawcy', 'wcrq'), 'wcrq_field_mail_from_email', 'wcrq', 'wcrq_main');
+    add_settings_field('mail_reply_to', __('Adres odpowiedzi (Reply-To)', 'wcrq'), 'wcrq_field_mail_reply_to', 'wcrq', 'wcrq_main');
 }
 add_action('admin_init', 'wcrq_register_settings');
 
@@ -280,6 +283,61 @@ function wcrq_prepare_registration_email_body($login, $password) {
     ];
 
     return strtr($template, $replacements);
+}
+
+function wcrq_get_mail_sender_settings() {
+    $options = get_option('wcrq_settings');
+
+    $from_name = '';
+    if (is_array($options) && !empty($options['mail_from_name'])) {
+        $from_name = (string) $options['mail_from_name'];
+    }
+    $from_name = trim(preg_replace('/[\r\n]+/', ' ', $from_name));
+    if ($from_name === '') {
+        $from_name = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
+    }
+
+    $from_email = '';
+    if (is_array($options) && !empty($options['mail_from_email']) && is_email($options['mail_from_email'])) {
+        $from_email = (string) $options['mail_from_email'];
+    }
+    if ($from_email === '') {
+        $default_email = get_option('admin_email');
+        if (is_email($default_email)) {
+            $from_email = $default_email;
+        }
+    }
+
+    $reply_to = '';
+    if (is_array($options) && !empty($options['mail_reply_to']) && is_email($options['mail_reply_to'])) {
+        $reply_to = (string) $options['mail_reply_to'];
+    }
+
+    return [
+        'from_name' => $from_name,
+        'from_email' => $from_email,
+        'reply_to' => $reply_to,
+    ];
+}
+
+function wcrq_prepare_email_headers() {
+    $headers = ['Content-Type: text/html; charset=UTF-8'];
+    $sender = wcrq_get_mail_sender_settings();
+
+    if (!empty($sender['from_email'])) {
+        $name = trim(preg_replace('/[\r\n]+/', ' ', (string) $sender['from_name']));
+        if ($name !== '') {
+            $headers[] = sprintf('From: %s <%s>', $name, $sender['from_email']);
+        } else {
+            $headers[] = sprintf('From: %s', $sender['from_email']);
+        }
+    }
+
+    if (!empty($sender['reply_to'])) {
+        $headers[] = sprintf('Reply-To: %s', $sender['reply_to']);
+    }
+
+    return $headers;
 }
 
 function wcrq_admin_menu() {
@@ -362,6 +420,18 @@ function wcrq_sanitize_settings($input) {
     $output['allow_navigation'] = !empty($input['allow_navigation']) ? 1 : 0;
     $output['show_results'] = !empty($input['show_results']) ? 1 : 0;
     $output['show_violations_to_users'] = !empty($input['show_violations_to_users']) ? 1 : 0;
+
+    $from_name = isset($input['mail_from_name']) ? sanitize_text_field(wp_unslash($input['mail_from_name'])) : '';
+    if ($from_name !== '') {
+        $from_name = function_exists('mb_substr') ? mb_substr($from_name, 0, 200) : substr($from_name, 0, 200);
+    }
+    $output['mail_from_name'] = $from_name;
+
+    $from_email = isset($input['mail_from_email']) ? sanitize_email(wp_unslash($input['mail_from_email'])) : '';
+    $output['mail_from_email'] = $from_email && is_email($from_email) ? $from_email : '';
+
+    $reply_to = isset($input['mail_reply_to']) ? sanitize_email(wp_unslash($input['mail_reply_to'])) : '';
+    $output['mail_reply_to'] = $reply_to && is_email($reply_to) ? $reply_to : '';
 
     if (isset($input['questions'])) {
         $questions = $input['questions'];
@@ -1414,6 +1484,27 @@ function wcrq_field_show_violations_to_users() {
     echo '<label><input type="checkbox" name="wcrq_settings[show_violations_to_users]" value="1"' . checked(1, $checked, false) . ' /> ' . esc_html__('Informuj uczestników o zarejestrowanych naruszeniach.', 'wcrq') . '</label>';
 }
 
+function wcrq_field_mail_from_name() {
+    $options = get_option('wcrq_settings');
+    $value = isset($options['mail_from_name']) ? $options['mail_from_name'] : '';
+    echo '<input type="text" name="wcrq_settings[mail_from_name]" value="' . esc_attr($value) . '" class="regular-text" />';
+    echo '<p class="description">' . esc_html__('Nazwa nadawcy używana w e-mailach z danymi logowania. Pozostaw puste, aby użyć nazwy witryny.', 'wcrq') . '</p>';
+}
+
+function wcrq_field_mail_from_email() {
+    $options = get_option('wcrq_settings');
+    $value = isset($options['mail_from_email']) ? $options['mail_from_email'] : '';
+    echo '<input type="email" name="wcrq_settings[mail_from_email]" value="' . esc_attr($value) . '" class="regular-text" />';
+    echo '<p class="description">' . esc_html__('Adres e-mail nadawcy. Wpisz adres w swojej domenie, aby poprawić dostarczalność.', 'wcrq') . '</p>';
+}
+
+function wcrq_field_mail_reply_to() {
+    $options = get_option('wcrq_settings');
+    $value = isset($options['mail_reply_to']) ? $options['mail_reply_to'] : '';
+    echo '<input type="email" name="wcrq_settings[mail_reply_to]" value="' . esc_attr($value) . '" class="regular-text" />';
+    echo '<p class="description">' . esc_html__('Opcjonalny adres odpowiedzi (Reply-To). Pozwala odbiorcom łatwo odpisać na wiadomość.', 'wcrq') . '</p>';
+}
+
 // Registration shortcode
 function wcrq_registration_shortcode() {
     $output = '';
@@ -1482,10 +1573,14 @@ function wcrq_registration_shortcode() {
                     } else {
                         $subject = __('Dane logowania do quizu', 'wcrq');
                         $body = wcrq_prepare_registration_email_body($login, $password);
-                        $headers = ['Content-Type: text/html; charset=UTF-8'];
-                        wp_mail($email, $subject, $body, $headers);
+                        $headers = wcrq_prepare_email_headers();
+                        $sent = wp_mail($email, $subject, $body, $headers);
 
-                        $output .= '<p>' . __('Rejestracja zakończona sukcesem. Sprawdź e-mail.', 'wcrq') . '</p>';
+                        if ($sent) {
+                            $output .= '<p>' . __('Rejestracja zakończona sukcesem. Sprawdź e-mail.', 'wcrq') . '</p>';
+                        } else {
+                            $output .= '<p>' . __('Rejestracja zakończona sukcesem, ale nie udało się wysłać wiadomości e-mail. Skontaktuj się z organizatorami, aby otrzymać dane logowania.', 'wcrq') . '</p>';
+                        }
                     }
                 }
             } else {
