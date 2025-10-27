@@ -285,6 +285,58 @@ function wcrq_prepare_registration_email_body($login, $password) {
     return strtr($template, $replacements);
 }
 
+function wcrq_get_default_sender_email_domain() {
+    $site_url = home_url();
+    $host = wp_parse_url($site_url, PHP_URL_HOST);
+
+    if (!$host) {
+        $site_url = site_url();
+        $host = wp_parse_url($site_url, PHP_URL_HOST);
+    }
+
+    if (!$host && isset($_SERVER['SERVER_NAME'])) {
+        $host = sanitize_text_field(wp_unslash($_SERVER['SERVER_NAME']));
+    }
+
+    if (!$host) {
+        return 'localhost';
+    }
+
+    $host = strtolower($host);
+    $host = preg_replace('/^www\./', '', $host);
+
+    return $host ?: 'localhost';
+}
+
+function wcrq_get_default_sender_email_address() {
+    $domain = wcrq_get_default_sender_email_domain();
+
+    if ($domain === 'localhost') {
+        return 'wordpress@localhost';
+    }
+
+    return sprintf('wordpress@%s', $domain);
+}
+
+function wcrq_is_restricted_sender_email($email) {
+    if (!is_email($email)) {
+        return true;
+    }
+
+    $domain = strtolower((string) wp_parse_url('mailto://' . $email, PHP_URL_HOST));
+    if (!$domain) {
+        $parts = explode('@', $email);
+        $domain = strtolower(end($parts));
+    }
+
+    $restricted_domains = apply_filters('wcrq_restricted_sender_domains', [
+        'gmail.com',
+        'googlemail.com',
+    ]);
+
+    return in_array($domain, $restricted_domains, true);
+}
+
 function wcrq_get_mail_sender_settings() {
     $options = get_option('wcrq_settings');
 
@@ -308,9 +360,26 @@ function wcrq_get_mail_sender_settings() {
         }
     }
 
+    $admin_email = get_option('admin_email');
+    if (!is_email($admin_email)) {
+        $admin_email = '';
+    }
+
     $reply_to = '';
     if (is_array($options) && !empty($options['mail_reply_to']) && is_email($options['mail_reply_to'])) {
         $reply_to = (string) $options['mail_reply_to'];
+    }
+    if ($reply_to === '' && $admin_email !== '') {
+        $reply_to = $admin_email;
+    }
+
+    $fallback_from_email = wcrq_get_default_sender_email_address();
+    if ($from_email === '' || wcrq_is_restricted_sender_email($from_email)) {
+        $from_email = $fallback_from_email;
+
+        if ($reply_to === '' && $admin_email !== '') {
+            $reply_to = $admin_email;
+        }
     }
 
     return [
